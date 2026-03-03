@@ -1,0 +1,3 @@
+[workspace]
+members = ["zte-lib", "zte-cli"]
+resolver = "2"

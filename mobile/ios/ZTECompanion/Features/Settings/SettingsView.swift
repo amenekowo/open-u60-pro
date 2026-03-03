@@ -1,0 +1,93 @@
+import SwiftUI
+
+struct SettingsView: View {
+    @State private var viewModel: SettingsViewModel
+
+    init(client: UbusClient) {
+        _viewModel = State(initialValue: SettingsViewModel(client: client))
+    }
+
+    var body: some View {
+        @Bindable var vm = viewModel
+        NavigationStack {
+            Form {
+                Section("Gateway") {
+                    HStack {
+                        TextField("Gateway IP", text: $vm.gatewayIP)
+                            .keyboardType(.decimalPad)
+                            .autocorrectionDisabled()
+                        Button("Detect") {
+                            Task { await viewModel.autoDetectGateway() }
+                        }
+                        .buttonStyle(.bordered)
+                        .font(.caption)
+                        .disabled(viewModel.isDetectingGateway)
+                        if viewModel.isDetectingGateway {
+                            ProgressView()
+                        }
+                    }
+                }
+
+                Section("Authentication") {
+                    if viewModel.hasStoredPassword {
+                        HStack {
+                            Text("Password stored in Keychain")
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Clear", role: .destructive) {
+                                viewModel.clearPassword()
+                            }
+                            .font(.caption)
+                        }
+                    }
+                    SecureField("New Password", text: $vm.passwordInput)
+                    Button("Save to Keychain") {
+                        viewModel.savePassword()
+                    }
+                    .disabled(viewModel.passwordInput.isEmpty)
+                }
+
+                Section("Polling") {
+                    VStack(alignment: .leading) {
+                        Text("Refresh interval: \(viewModel.pollInterval, specifier: "%.1f")s")
+                        Slider(value: $vm.pollInterval, in: 1...10, step: 0.5)
+                    }
+                }
+
+                Section("Appearance") {
+                    Picker("Theme", selection: $vm.darkModeOverride) {
+                        Text("System").tag(0)
+                        Text("Light").tag(1)
+                        Text("Dark").tag(2)
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                Section("About") {
+                    LabeledContent("App", value: "ZTE Companion")
+                    LabeledContent("Device", value: "ZTE U60 Pro (MU5250)")
+                    LabeledContent("API", value: "ubus JSON-RPC 2.0")
+                }
+            }
+            .navigationTitle("Settings")
+            .overlay {
+                if viewModel.showSavedConfirmation {
+                    savedToast
+                }
+            }
+        }
+    }
+
+    private var savedToast: some View {
+        Text("Password saved")
+            .font(.subheadline.weight(.medium))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+            .transition(.move(edge: .top).combined(with: .opacity))
+            .task {
+                try? await Task.sleep(for: .seconds(1.5))
+                withAnimation { viewModel.showSavedConfirmation = false }
+            }
+    }
+}

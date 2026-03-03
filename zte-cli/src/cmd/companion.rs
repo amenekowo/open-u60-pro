@@ -152,14 +152,22 @@ end
 
 local function handle_call(method)
     if method == "battery_current" then
-        -- Read from /sys/class/power_supply/*/current_now
+        -- Read from /sys/class/power_supply/*/current_now (and voltage_now)
         local dirs = { "/sys/class/power_supply/battery", "/sys/class/power_supply/BAT0" }
         for _, dir in ipairs(dirs) do
             local val = read_file(dir .. "/current_now")
             if val then
                 local microamps = tonumber(val:match("%-?%d+"))
                 if microamps then
-                    io.write(json.encode({ current_now = microamps }))
+                    local result = { current_now = microamps }
+                    local vval = read_file(dir .. "/voltage_now")
+                    if vval then
+                        local microvolts = tonumber(vval:match("%-?%d+"))
+                        if microvolts then
+                            result.voltage_now = microvolts
+                        end
+                    end
+                    io.write(json.encode(result))
                     return
                 end
             end

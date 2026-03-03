@@ -30,11 +30,19 @@ struct BatteryCardView: View {
             batteryStatusText
             if let ma = battery.currentMA {
                 Text("\u{00B7}").font(.caption).foregroundStyle(.secondary)
-                AnimatedNumber(value: ma,
-                               font: .caption.monospacedDigit(),
-                               textColor: batteryStatusColor,
-                               prefix: ma >= 0 ? "+" : nil,
-                               suffix: "mA")
+                if let mv = battery.voltageMV {
+                    let watts = Double(mv) * Double(abs(ma)) / 1_000_000.0
+                    AnimatedNumber(value: watts, decimalPlaces: 1,
+                                   font: .caption.monospacedDigit(),
+                                   textColor: batteryStatusColor,
+                                   suffix: "W")
+                } else {
+                    AnimatedNumber(value: ma,
+                                   font: .caption.monospacedDigit(),
+                                   textColor: batteryStatusColor,
+                                   prefix: ma >= 0 ? "+" : nil,
+                                   suffix: "mA")
+                }
             }
         }
         .lineLimit(1)

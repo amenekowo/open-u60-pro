@@ -8,6 +8,7 @@ struct BatteryStatus: Equatable {
     var timeToFull: Int = -1      // minutes, -1 = unknown
     var timeToEmpty: Int = -1     // minutes, -1 = unknown
     var currentMA: Int?            // milliamps; negative = discharging, positive = charging
+    var voltageMV: Int?            // millivolts from ubus
 
     static let empty = BatteryStatus()
 }
@@ -109,6 +110,16 @@ struct SystemInfo: Equatable {
     var memFree: UInt64 = 0
 
     static let empty = SystemInfo()
+}
+
+struct USBStatus: Equatable {
+    var mode: String = ""
+    var typecCC: String = "no_cc"
+    var dataConnected: Bool = false
+    var powerbankActive: Bool = false
+    var cableAttached: Bool { typecCC != "no_cc" }
+
+    static let empty = USBStatus()
 }
 
 // MARK: - Parsers
@@ -287,6 +298,17 @@ enum DeviceParser {
             i = next
         }
         return String(utf16CodeUnits: u16s, count: u16s.count)
+    }
+
+    // MARK: - USB Parser
+
+    static func parseUSBStatus(_ usbData: [String: Any], chargerData: [String: Any]?) -> USBStatus {
+        USBStatus(
+            mode: usbData["mode"] as? String ?? "",
+            typecCC: usbData["typec_cc"] as? String ?? "no_cc",
+            dataConnected: asInt(usbData["connect"]) == 1,
+            powerbankActive: asInt(chargerData?["otg_powerbank_state"]) == 1
+        )
     }
 
     // MARK: - APN Parser

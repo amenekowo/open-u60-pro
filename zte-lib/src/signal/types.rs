@@ -115,6 +115,7 @@ pub struct DeviceInfo {
     pub battery_pct: Option<u32>,
     pub battery_temp: Option<f64>,
     pub battery_current_ua: Option<i64>,
+    pub battery_voltage_mv: Option<i64>,
     pub cpu_temp: Option<f64>,
     pub cpu_usage: Option<f64>,
     pub sim_status: Option<String>,

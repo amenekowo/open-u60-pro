@@ -10,6 +10,7 @@ struct TabBarView: View {
 
     @State private var dashboardVM: DashboardViewModel
     @State private var smsVM: SMSViewModel
+    @State private var usbVM: USBConnectionViewModel
 
     private struct DashboardPollKey: Equatable {
         let interval: Double
@@ -21,6 +22,7 @@ struct TabBarView: View {
         self.authManager = authManager
         _dashboardVM = State(initialValue: DashboardViewModel(client: client, authManager: authManager))
         _smsVM = State(initialValue: SMSViewModel(client: client, authManager: authManager))
+        _usbVM = State(initialValue: USBConnectionViewModel(client: client, authManager: authManager))
     }
 
     var body: some View {
@@ -62,6 +64,14 @@ struct TabBarView: View {
             defer { dashboardVM.stopPolling() }
             // Keep task alive until cancelled; sleep throws CancellationError, caught by try?
             try? await Task.sleep(for: .seconds(86400 * 365))
+        }
+        .task {
+            usbVM.startPolling(interval: 3.0)
+            defer { usbVM.stopPolling() }
+            try? await Task.sleep(for: .seconds(86400 * 365))
+        }
+        .sheet(isPresented: $usbVM.showModeSheet) {
+            USBModeSheetView(viewModel: usbVM)
         }
     }
 }

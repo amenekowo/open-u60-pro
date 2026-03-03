@@ -15,6 +15,12 @@ struct ToolsListView: View {
                     }
 
                     NavigationLink {
+                        USBModeView(viewModel: USBConnectionViewModel(client: client, authManager: authManager))
+                    } label: {
+                        Label("USB Mode", systemImage: "cable.connector")
+                    }
+
+                    NavigationLink {
                         BandLockView(viewModel: BandLockViewModel(client: client, authManager: authManager))
                     } label: {
                         Label("Band Lock", systemImage: "lock.fill")

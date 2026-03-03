@@ -113,7 +113,8 @@ final class DashboardViewModel {
             if let chargerData = charger {
                 DeviceParser.parseCharger(chargerData, into: &b)
             }
-            b.currentMA = battCurrent
+            b.currentMA = battCurrent.current
+            b.voltageMV = battCurrent.voltage
             if b != battery { battery = b }
         }
         if let t = therm, t != thermal { thermal = t }
@@ -334,10 +335,10 @@ final class DashboardViewModel {
         return DeviceParser.parseSystemInfo(data, cpuCores: cachedCpuCores)
     }
 
-    private func fetchBatteryCurrent(token: String) async -> Int? {
+    private func fetchBatteryCurrent(token: String) async -> (current: Int?, voltage: Int?) {
         if battCurrentFileReadCooldown > 0 {
             battCurrentFileReadCooldown -= 1
-            return nil
+            return (nil, nil)
         }
         do {
             let (_, data) = try await client.call(
@@ -346,25 +347,26 @@ final class DashboardViewModel {
             )
             guard let microamps = data["current_now"] as? Int else {
                 logger.debug("battery current_now: missing or unparseable data")
-                return nil
+                return (nil, nil)
             }
             battCurrentFileReadFailCount = 0
             battCurrentFileReadCooldown = 0
-            return microamps / 1000
+            let voltageMV: Int? = (data["voltage_now"] as? Int).map { $0 / 1000 }
+            return (microamps / 1000, voltageMV)
         } catch let error as UbusError {
-            if Self.isCancellation(error) { return nil }
+            if Self.isCancellation(error) { return (nil, nil) }
             battCurrentFileReadFailCount += 1
             logger.warning("battery current_now error: \(String(describing: error)) (fail \(self.battCurrentFileReadFailCount)/\(Self.maxCpuFileReadFails))")
             if case .requestFailed = error, battCurrentFileReadFailCount >= Self.maxCpuFileReadFails {
                 battCurrentFileReadCooldown = 10
                 logger.warning("battery current_now cooldown after \(Self.maxCpuFileReadFails) consecutive failures (retry in ~10 cycles)")
             }
-            return nil
+            return (nil, nil)
         } catch {
-            if Self.isCancellation(error) { return nil }
+            if Self.isCancellation(error) { return (nil, nil) }
             battCurrentFileReadFailCount += 1
             logger.warning("battery current_now unexpected error: \(String(describing: error))")
-            return nil
+            return (nil, nil)
         }
     }
 

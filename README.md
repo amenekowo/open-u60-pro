@@ -1,26 +1,8 @@
 <div align="center">
 
-```
-    ╭─────────────────────────╮
-    │  ┌───────────────────┐  │
-    │  │   ╱╱╱  ZTE  ╲╲╲  │  │
-    │  │                   │  │
-    │  │    5G ▁▂▃▅▇       │  │
-    │  │    ↓ 482 Mbps     │  │
-    │  │    ↑  37 Mbps     │  │
-    │  │                   │  │
-    │  │  🔋 87%    42°C   │  │
-    │  │  n78 ─── Band 3   │  │
-    │  │  WiFi 7   64 STA  │  │
-    │  │                   │  │
-    │  └───────────────────┘  │
-    │         U60 Pro         │
-    │                         │
-    │                         │
-    │         ○  NFC          │
-    │                         │
-    ╰─────────────────────────╯
-```
+<p>
+<img src="mobile/ios/screenshots/screenshot1.PNG" alt="Dashboard" width="250">&nbsp;&nbsp;<img src="mobile/ios/screenshots/screenshot3.png" alt="Signal Monitor" width="250">&nbsp;&nbsp;<img src="mobile/ios/screenshots/screenshot2.PNG" alt="Router Settings" width="250">
+</p>
 
 # ZTE U60 Pro Toolkit
 
@@ -90,6 +72,71 @@ Native apps that connect directly over WiFi — no computer needed.
 | **Dependencies** | None (Apple frameworks only) | OkHttp, Hilt, Vico, kotlinx.serialization |
 | **Features** | BandLock, Clients, Config, Dashboard, DeviceInfo, Login, Settings, Signal, Tools | Same |
 | **Path** | `mobile/ios/ZTECompanion/` (38 Swift files) | `mobile/android/ZTECompanion/` (32 Kotlin files) |
+
+## Device Impact
+
+> **Warning** — Several commands modify your device's filesystem and firmware settings.
+> All write operations require `--confirm` (or are gated behind the `zte setup` wizard).
+
+### Command Impact
+
+| Command | What It Does | Survives Reboot | Undo |
+|---|---|---|---|
+| `zte setup` | Enables ADB + installs dropbear SSH + pushes keys (combines `adb-enable` and `ssh`) | Yes | See `ssh` and `adb-enable` below |
+| `zte ssh` | Pushes dropbear binary, generates host key, writes `authorized_keys`, hooks `rc.local` | Yes (rc.local hook) | Remove files manually (see Recovery) |
+| `zte adb-enable` | Calls `zwrt_bsp.usb.set {mode: "debug"}` to enable USB debug | Yes (firmware setting) | `zwrt_bsp.usb.set {mode: "normal"}` via ubus |
+| `zte acl patch` | Bind-mounts modified ACL over `/usr/share/rpcd/acl.d/`, hooks `rc.local` | Yes (rc.local hook) | `zte acl reset` |
+| `zte companion install` | Installs rpcd Lua plugin, bind-mounts over `/usr/libexec/rpcd/`, hooks `rc.local` | Yes (rc.local hook) | `zte companion remove` |
+| `zte network band --lock` | Writes NR/LTE band lock via firmware API | Yes (firmware setting) | `zte network band --unlock-all --confirm` |
+| `zte network ttl --set` | Adds iptables mangle rules for TTL/HL masking | **No** | `zte network ttl --clear --confirm` or reboot |
+| `zte network telemetry --disable` | Appends to `/etc/hosts` + adds iptables OUTPUT DROP rules | Partial (/etc/hosts yes, iptables no) | Edit `/etc/hosts` manually; iptables rules clear on reboot |
+| `zte network dns --set` | Writes DNS config via UCI | Yes | `zte network dns --set` with original values |
+| `zte backup restore` | Overwrites `/userconfig/config.bin` with re-encrypted config | Yes | Only reversible with a prior `zte backup backup` |
+| `zte settings device factory-reset` | Full factory reset via `zwrt_bsp.power.factory_reset` | **Irreversible** | N/A — wipes all data and custom config |
+
+**Read-only commands** (no device changes): `zte monitor`, `zte explore`, `zte probe`, `zte acl show`, `zte backup backup`, `zte backup decrypt`, `zte backup view`, `zte settings ... --show`, `zte network ... --status/--show/--scan`.
+
+### Filesystem Layout
+
+Files land in two locations on the device:
+
+```
+/data/local/tmp/                    (writable /data partition)
+├── dropbear                        ← SSH binary (zte ssh)
+├── start_ssh.sh                    ← SSH boot script (zte ssh)
+├── zte-companion-plugin            ← rpcd Lua plugin (zte companion install)
+├── companion_plugin.sh             ← companion boot script
+├── rpcd-plugins/                   ← companion bind-mount overlay
+├── rpcd-acl.d/                     ← ACL bind-mount overlay (zte acl patch)
+└── acl_patch.sh                    ← ACL boot script
+
+/etc/                               (read-only rootfs — may fail on some firmware)
+├── rc.local                        ← boot hooks appended here
+└── dropbear/
+    ├── authorized_keys             ← your SSH public key
+    └── dropbear_rsa_host_key       ← generated host key
+
+/usr/share/rpcd/acl.d/web.json      ← original ACL (bind-mounted over by acl patch)
+/usr/libexec/rpcd/                   ← original rpcd plugins (bind-mounted over by companion)
+/userconfig/config.bin               ← device config (overwritten by backup restore)
+```
+
+### Recovery
+
+- **Factory reset** (`zte settings device factory-reset --confirm`) wipes everything — all custom files, SSH keys, ACL patches, and companion plugins.
+- **Per-feature undo commands:**
+  - ACL: `zte acl reset`
+  - Companion: `zte companion remove`
+  - Bands: `zte network band --unlock-all --confirm`
+  - TTL: `zte network ttl --clear --confirm` (or just reboot)
+- **Manual SSH removal** (if `zte ssh` was used):
+  ```bash
+  # Via ADB shell or existing SSH session
+  rm /data/local/tmp/dropbear /data/local/tmp/start_ssh.sh
+  rm /etc/dropbear/authorized_keys /etc/dropbear/dropbear_rsa_host_key
+  sed -i '\|start_ssh.sh|d' /etc/rc.local
+  killall dropbear
+  ```
 
 ## Quick Start
 

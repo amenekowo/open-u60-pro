@@ -384,6 +384,16 @@ pub fn render_device_panel(
         lines.push(Line::from(format!("  Current:    {:.0} mA ({label})", ma.abs())));
     }
 
+    // Battery voltage + power
+    if let Some(mv) = dev.battery_voltage_mv {
+        let v = mv as f64 / 1000.0;
+        lines.push(Line::from(format!("  Voltage:    {v:.2} V")));
+        if let Some(ua) = dev.battery_current_ua {
+            let watts = (mv as f64 * ua.abs() as f64) / 1_000_000_000.0;
+            lines.push(Line::from(format!("  Power:      {watts:.1} W")));
+        }
+    }
+
     // CPU temp
     lines.push(Line::from(vec![
         Span::raw("  CPU Temp:   "),

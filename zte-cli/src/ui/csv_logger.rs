@@ -14,7 +14,7 @@ timestamp,\
 nr_rsrp,nr_rsrq,nr_sinr,nr_band,nr_pci,nr_cell_id,nr_arfcn,nr_bandwidth,nr_rssi,nr_ca,\
 lte_rsrp,lte_rsrq,lte_sinr,lte_band,lte_pci,lte_earfcn,lte_rssi,\
 operator,act,\
-battery,battery_current_ua,cpu_temp,cpu_usage,\
+battery,battery_current_ua,battery_voltage_mv,cpu_temp,cpu_usage,\
 dl_speed_mbps,ul_speed_mbps,dl_total_bytes,ul_total_bytes,\
 wifi_2g_enabled,wifi_5g_enabled,wifi_clients_2g,wifi_clients_5g";
 
@@ -49,7 +49,7 @@ impl CsvLogger {
 
         writeln!(
             self.writer,
-            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
             ts,
             opt_f64(snap.nr.rsrp),
             opt_f64(snap.nr.rsrq),
@@ -72,6 +72,7 @@ impl CsvLogger {
             opt_str(&snap.cops.act),
             snap.device.battery_pct.map(|v| v.to_string()).unwrap_or_default(),
             snap.device.battery_current_ua.map(|v| v.to_string()).unwrap_or_default(),
+            snap.device.battery_voltage_mv.map(|v| v.to_string()).unwrap_or_default(),
             opt_f64(snap.device.cpu_temp),
             opt_f64(snap.device.cpu_usage),
             opt_f64(snap.connection.dl_speed_mbps),

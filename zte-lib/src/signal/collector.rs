@@ -175,9 +175,12 @@ impl SignalCollector {
             snap.device.battery_time_to_empty = get_i64(&bat, "battery_time_to_empty");
         }
 
-        // Battery current via zte-companion (microamps)
+        // Battery current + voltage via zte-companion
         if let Ok(resp) = device.ubus_call("zte-companion", "battery_current", None, 5) {
             snap.device.battery_current_ua = resp.get("current_now").and_then(|v| v.as_i64());
+            snap.device.battery_voltage_mv = resp.get("voltage_now")
+                .and_then(|v| v.as_i64())
+                .map(|uv| uv / 1000);
         }
 
         // Charger
@@ -292,9 +295,12 @@ impl SignalCollector {
             snap.device.battery_time_to_empty = get_i64(&bat, "battery_time_to_empty");
         }
 
-        // Battery current via zte-companion (microamps)
+        // Battery current + voltage via zte-companion
         if let Ok(resp) = http.call("zte-companion", "battery_current", None) {
             snap.device.battery_current_ua = resp.get("current_now").and_then(|v| v.as_i64());
+            snap.device.battery_voltage_mv = resp.get("voltage_now")
+                .and_then(|v| v.as_i64())
+                .map(|uv| uv / 1000);
         }
 
         // Charger

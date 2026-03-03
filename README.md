@@ -25,16 +25,28 @@ config backup/decryption, SSH access, network customization, and more.
 | | |
 |---|---|
 | **Model** | ZTE U60 Pro (MU5250) |
-| **Chipset** | Qualcomm Snapdragon X75 (SDX75) |
+| **Hardware** | `MU5250_HW1.0` |
+| **Firmware** | `CN_ZTE_MU5250V1.0.0B27` (Oct 31, 2025) |
+| **Chipset** | Qualcomm Snapdragon X75 (SDX75 / SDXPINN) |
+| **CPU** | 4x Cortex-A55 (ARMv8.2-A) @ 2.2 GHz |
+| **RAM** | 1.6 GB |
+| **Storage** | 8 GB eMMC (Longsys JS08AC), 69 partitions, A/B slots |
 | **Modem** | 5G-A Sub-6 + mmWave, Cat 22 LTE |
-| **WiFi** | WiFi 7 (802.11be) AX3600 |
-| **WiFi Chipset** | Qualcomm WCN7851 |
-| **Battery** | 10,000 mAh |
+| **NR Bands** | n1/2/3/5/7/8/18/20/26/28/29/38/40/41/48/66/71/75/77/78/79 |
+| **LTE Bands** | 1/2/3/4/5/7/8/18/19/20/26/28/29/32/34/38/39/40/41/42/43/48/66/71 |
+| **WiFi** | WiFi 7 (802.11be), 2x2 MIMO, EHT160 |
+| **WiFi Chipset** | Qualcomm WCN7851 (`qcacld32`) |
+| **WiFi Radios** | 2.4 GHz (ch 1–13, EHT40, 19 dBm) · 5 GHz (ch 36–165, EHT160, 18 dBm) |
+| **Battery** | 10,000 mAh Li-ion, 4.5V max, PM7550B fuel gauge |
+| **Charging** | USB-PD, 15W (5V/3A), fast charge |
+| **USB** | USB-C (PD sink, OTG/powerbank) |
 | **Display** | 3.5" touchscreen |
-| **OS** | ZWRT (ZTE custom OpenWrt 23.05.4) |
-| **Kernel** | Linux 5.15.170, aarch64_cortex-a53 |
+| **OS** | ZWRT (OpenWrt 23.05.4 r24012-d8dd03c46f) |
+| **Kernel** | Linux 5.15.170-perf, SMP PREEMPT, aarch64 |
+| **PMICs** | PMX75 + PM7550BA + PMG1110 |
+| **SIM** | Single nano-SIM (no eSIM) |
 | **NFC** | Quick device pairing |
-| **Clients** | Up to 64 simultaneous connections |
+| **Clients** | Up to 64 (32 per radio) |
 
 ## What's Included
 
@@ -489,6 +501,15 @@ ztedevices.com          www.ztedevices.com       support.ztedevices.com
 - Session tokens expire after ~5 minutes; tools auto-retry
 - Salt fetch field name: `zte_web_sault` (ZTE typo, not `salt`)
 - WiFi 5GHz radio: Qualcomm WCN7851, 21 dBm (~126 mW) at 40% power, EHT160 (WiFi 7); `txpowerpercent` adjustable 10–100% in UCI
+- **CPU**: OpenWrt target says `aarch64_cortex-a53` but CPU part `0xd05` variant `0x2` = Cortex-A55 (ARMv8.2-A). Frequencies: 691 MHz – 2.2 GHz
+- **Board**: Device-tree model `Qualcomm Technologies, Inc. SDXPINN IDP MBB`, board `qcom,sdxpinn-idp`
+- **eMMC**: Longsys `JS08AC`, manufacturer ID `0x0000f2`, 8 GB (7,389,184 blocks)
+- **Boot**: A/B partition scheme (`SLOT_SUFFIX=_a`), SELinux enforcing
+- **Battery model**: `7527761_ZTE_MU5250_HIGHPOWER_10000MAH_PM7550B` (design capacity 10,214 µAh)
+- **Thermal**: 40 thermal zones — CPU (cpuss-0..3), modem (mdmss-0..2, mdmq6-0), mmWave (mmw0..3), PMICs (pmx75, pm7550ba, pmg1110), USB, battery, ethphy
+- **AI partition**: `/ai_app` (365 MB) contains `xDpi_SigLibSoft.bin` (signal processing model)
+- **WiFi driver**: `qcacld32` (Qualcomm Connected Audio/Lighting/Data 3.2)
+- **Firmware build**: `BD_CNMU5250V1.0.0B27`, integrated `CN_ZTE_MU5250V1.0.0B27`, build date Oct 31 2025
 
 ## License & Disclaimers
 

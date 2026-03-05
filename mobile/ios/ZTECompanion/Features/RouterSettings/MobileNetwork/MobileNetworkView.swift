@@ -13,16 +13,42 @@ struct MobileNetworkView: View {
                 }
             }
 
+            Section {
+                Toggle("Airplane Mode", isOn: Binding(
+                    get: { viewModel.airplaneModeEnabled },
+                    set: { val in
+                        viewModel.airplaneModeEnabled = val
+                        Task { await viewModel.setAirplaneMode(enabled: val) }
+                    }
+                ))
+                .disabled(viewModel.isLoading)
+
+                Toggle("Mobile Data", isOn: Binding(
+                    get: { viewModel.selectedDataEnabled },
+                    set: { val in
+                        viewModel.selectedDataEnabled = val
+                        Task { await viewModel.setMobileData(enabled: val) }
+                    }
+                ))
+                .disabled(viewModel.isLoading || viewModel.airplaneModeEnabled)
+            } header: {
+                Text("Connectivity")
+            } footer: {
+                Text(mobileDataFooter)
+            }
+
             Section("Connection Mode") {
                 Picker("Mode", selection: $viewModel.selectedConnectMode) {
                     Text("Automatic").tag(1)
                     Text("Manual").tag(0)
                 }
                 .pickerStyle(.segmented)
+                .disabled(viewModel.isLoading || viewModel.airplaneModeEnabled)
             }
 
             Section {
                 Toggle("Data Roaming", isOn: $viewModel.selectedRoaming)
+                    .disabled(viewModel.isLoading || viewModel.airplaneModeEnabled)
             } footer: {
                 Text("Enabling roaming may incur additional charges from your carrier.")
             }
@@ -33,6 +59,7 @@ struct MobileNetworkView: View {
                     Text("Manual").tag("manual_select")
                 }
                 .pickerStyle(.segmented)
+                .disabled(viewModel.isLoading || viewModel.airplaneModeEnabled)
 
                 if viewModel.selectedNetSelectMode == "manual_select" {
                     Button {
@@ -75,16 +102,6 @@ struct MobileNetworkView: View {
                 }
             }
 
-            Section("APN") {
-                LabeledContent("Current APN", value: viewModel.config.currentAPN.isEmpty ? "—" : viewModel.config.currentAPN)
-
-                NavigationLink {
-                    APNView(viewModel: APNViewModel(client: viewModel.client, authManager: viewModel.authManager))
-                } label: {
-                    Text("Manage APN Settings")
-                }
-            }
-
             Section {
                 Button {
                     Task { await viewModel.applySettings() }
@@ -92,7 +109,7 @@ struct MobileNetworkView: View {
                     Text("Apply")
                         .frame(maxWidth: .infinity)
                 }
-                .disabled(viewModel.isLoading || !viewModel.hasChanges)
+                .disabled(viewModel.isLoading || !viewModel.hasChanges || viewModel.airplaneModeEnabled)
             }
         }
         .navigationTitle("Mobile Network")
@@ -101,9 +118,36 @@ struct MobileNetworkView: View {
             if viewModel.isLoading {
                 ProgressView()
                     .padding()
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                    .background(Color(.systemBackground).opacity(0.85), in: RoundedRectangle(cornerRadius: 8))
             }
         }
+        .alert("Reboot Required", isPresented: $viewModel.showRebootAfterAirplaneOff) {
+            Button("Reboot Now") {
+                Task { await viewModel.reboot() }
+            }
+            Button("Cancel", role: .cancel) {
+                viewModel.airplaneModeEnabled = true
+            }
+        } message: {
+            Text("Due to a firmware limitation, the cellular radio cannot be restored without rebooting. The router will restart (about 60 seconds).")
+        }
         .task { await viewModel.refresh() }
+    }
+
+    private var mobileDataFooter: String {
+        if !viewModel.config.isDataEnabled && viewModel.config.isConnected {
+            return "Mobile data setting is off, but the connection is still active."
+        } else if !viewModel.config.isDataEnabled {
+            return "Mobile data is disabled."
+        } else if viewModel.config.isConnected {
+            let status = viewModel.config.connectStatus
+                .replacingOccurrences(of: "_", with: " ")
+                .capitalized
+            return "Connected — \(status)"
+        } else if !viewModel.config.connectStatus.isEmpty {
+            return "Disconnected"
+        } else {
+            return "Disabling mobile data will disconnect the cellular connection."
+        }
     }
 }

@@ -4,17 +4,21 @@ import SwiftUI
 @MainActor
 final class MobileNetworkViewModel {
     var config: MobileNetworkConfig = .empty
-    var isLoading: Bool = false
+    var isLoading: Bool = true
     var message: String?
     var messageIsError: Bool = false
     var isScanning: Bool = false
+    var airplaneModeEnabled: Bool = false
+    var showRebootAfterAirplaneOff: Bool = false
 
     var selectedConnectMode: Int = 1
     var selectedRoaming: Bool = false
+    var selectedDataEnabled: Bool = false
     var selectedNetSelectMode: String = "auto_select"
 
-    let client: UbusClient
-    let authManager: AuthManager
+    private var airplaneModeLoaded: Bool = false
+    private let client: UbusClient
+    private let authManager: AuthManager
 
     init(client: UbusClient, authManager: AuthManager) {
         self.client = client
@@ -34,6 +38,8 @@ final class MobileNetworkViewModel {
         message = nil
         let token = authManager.sessionToken
 
+        await fetchAirplaneMode()
+
         do {
             async let wwanCall = client.call(
                 sessionToken: token,
@@ -47,43 +53,55 @@ final class MobileNetworkViewModel {
                 method: "nwinfo_get_netinfo",
                 params: [:]
             )
-            async let apnModeCall = client.call(
-                sessionToken: token,
-                object: "zwrt_apn_object",
-                method: "get_apn_mode",
-                params: [:]
-            )
-            async let apnListCall = client.call(
-                sessionToken: token,
-                object: "zwrt_apn_object",
-                method: "get_manu_apn_list",
-                params: [:]
-            )
-
             let (_, wwanData) = try await wwanCall
             let (_, netInfoData) = try await netInfoCall
-            let (_, apnModeData) = try await apnModeCall
-            let (_, apnListData) = try await apnListCall
 
             let wwan = MobileNetworkParser.parseWWAN(wwanData)
             let netSelectMode = MobileNetworkParser.parseNetInfo(netInfoData)
-            let currentAPN = MobileNetworkParser.parseCurrentAPN(apnModeData, apnListData)
 
             config = MobileNetworkConfig(
                 connectMode: wwan.connectMode,
                 roamEnable: wwan.roamEnable,
+                dataEnabled: wwan.dataEnabled,
+                connectStatus: wwan.connectStatus,
                 netSelectMode: netSelectMode,
-                currentAPN: currentAPN,
                 operators: config.operators,
                 scanStatus: config.scanStatus
             )
             selectedConnectMode = config.connectMode
             selectedRoaming = config.isRoamingEnabled
+            selectedDataEnabled = config.isDataEnabled
             selectedNetSelectMode = config.netSelectMode
         } catch {
             showMessage("Failed to load: \(error.localizedDescription)", isError: true)
         }
 
+        isLoading = false
+    }
+
+    // MARK: - Mobile Data (immediate)
+
+    func setMobileData(enabled: Bool) async {
+        isLoading = true
+        let token = authManager.sessionToken
+        do {
+            let (_, _) = try await client.call(
+                sessionToken: token,
+                object: "zwrt_data",
+                method: "set_wwaniface",
+                params: [
+                    "cid": 1,
+                    "connect_mode": config.connectMode,
+                    "roam_enable": config.roamEnable,
+                    "enable": enabled ? 1 : 0
+                ]
+            )
+            config.dataEnabled = enabled ? 1 : 0
+            showMessage(enabled ? "Mobile data enabled" : "Mobile data disabled", isError: false)
+        } catch {
+            selectedDataEnabled = !enabled
+            showMessage("Failed: \(error.localizedDescription)", isError: true)
+        }
         isLoading = false
     }
 
@@ -103,7 +121,8 @@ final class MobileNetworkViewModel {
                     params: [
                         "cid": 1,
                         "connect_mode": selectedConnectMode,
-                        "roam_enable": selectedRoaming ? 1 : 0
+                        "roam_enable": selectedRoaming ? 1 : 0,
+                        "enable": config.dataEnabled
                     ]
                 )
             }
@@ -134,6 +153,7 @@ final class MobileNetworkViewModel {
                 if wwan.connectMode == selectedConnectMode && (wwan.roamEnable != 0) == selectedRoaming {
                     config.connectMode = wwan.connectMode
                     config.roamEnable = wwan.roamEnable
+                    config.connectStatus = wwan.connectStatus
                     config.netSelectMode = selectedNetSelectMode
                     showMessage("Settings applied", isError: false)
                     isLoading = false
@@ -248,6 +268,95 @@ final class MobileNetworkViewModel {
             showMessage("Failed: \(error.localizedDescription)", isError: true)
         }
 
+        isLoading = false
+    }
+
+    // MARK: - Airplane Mode
+
+    private func fetchAirplaneMode() async {
+        let token = authManager.sessionToken
+        do {
+            let (_, data) = try await client.call(
+                sessionToken: token,
+                object: "zte-companion",
+                method: "modem_status",
+                params: [:]
+            )
+            let mode = data["operate_mode"] as? String ?? ""
+            if !mode.isEmpty {
+                let newAirplane = (mode != "ONLINE")
+                if newAirplane != airplaneModeEnabled { airplaneModeEnabled = newAirplane }
+            }
+            airplaneModeLoaded = true
+        } catch {
+            showMessage("Failed to load airplane mode status", isError: true)
+        }
+    }
+
+    func setAirplaneMode(enabled: Bool) async {
+        guard airplaneModeLoaded else { return }
+        isLoading = true
+        let token = authManager.sessionToken
+        do {
+            if enabled {
+                let (_, _) = try await client.call(
+                    sessionToken: token,
+                    object: "zte_nwinfo_api",
+                    method: "nwinfo_set_mode",
+                    params: ["operate_mode": "LPM"]
+                )
+                showMessage("Airplane mode enabled — cellular radio off", isError: false)
+            } else {
+                var succeeded = false
+                for attempt in 1...2 {
+                    let (_, data) = try await client.call(
+                        sessionToken: token,
+                        object: "zte-companion",
+                        method: "modem_online",
+                        params: [:]
+                    )
+                    if data["error"] == nil {
+                        succeeded = true
+                        break
+                    }
+                    if attempt == 1 {
+                        try await Task.sleep(for: .seconds(3))
+                    }
+                }
+                if !succeeded {
+                    throw NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "Companion modem_online failed after retry"])
+                }
+                showMessage("Airplane mode disabled — signal recovering...", isError: false)
+                // Re-fetch mobile data state after modem comes back online
+                try? await Task.sleep(for: .seconds(2))
+                await refresh()
+            }
+        } catch {
+            if !enabled {
+                airplaneModeEnabled = true
+                showRebootAfterAirplaneOff = true
+            } else {
+                airplaneModeEnabled = false
+            }
+            showMessage("Failed: \(error.localizedDescription)", isError: true)
+        }
+        isLoading = false
+    }
+
+    func reboot() async {
+        isLoading = true
+        let token = authManager.sessionToken
+        do {
+            let (_, _) = try await client.call(
+                sessionToken: token,
+                object: "zwrt_bsp.power",
+                method: "reboot",
+                params: [:]
+            )
+            showMessage("Router is rebooting...", isError: false)
+        } catch {
+            showMessage("Failed: \(error.localizedDescription)", isError: true)
+        }
         isLoading = false
     }
 

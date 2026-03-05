@@ -10,9 +10,10 @@ final class DeviceControlViewModel {
     var showFactoryResetConfirm: Bool = false
     var powerSupplyEnabled: Bool = false
     var powerSaveEnabled: Bool = false
+    var fastBootEnabled: Bool = false
     private var powerSupplyLoaded: Bool = false
     private var powerSaveLoaded: Bool = false
-
+    private var fastBootLoaded: Bool = false
     private let client: UbusClient
     private let authManager: AuthManager
 
@@ -23,6 +24,7 @@ final class DeviceControlViewModel {
 
     func refresh() async {
         let token = authManager.sessionToken
+
         do {
             let (_, data) = try await client.call(
                 sessionToken: token,
@@ -31,7 +33,10 @@ final class DeviceControlViewModel {
                 params: [:]
             )
             let mode = (data["direct_power_supply_mode"] as? String ?? "").lowercased()
-            powerSupplyEnabled = (mode == "enable" || mode == "1")
+            if !mode.isEmpty {
+                let newPowerSupply = (mode == "enable" || mode == "1")
+                if newPowerSupply != powerSupplyEnabled { powerSupplyEnabled = newPowerSupply }
+            }
             powerSupplyLoaded = true
         } catch {
             showMessage("Failed to load power supply status", isError: true)
@@ -42,13 +47,23 @@ final class DeviceControlViewModel {
                 sessionToken: token,
                 object: "zwrt_mc.device.manager",
                 method: "get_device_info",
-                params: ["deviceInfoList": ["power_saver_mode"]]
+                params: ["deviceInfoList": ["power_saver_mode", "quicken_power_on"]]
             )
             let psMode = psData["power_saver_mode"] as? String ?? ""
-            powerSaveEnabled = (psMode == "1")
+            if !psMode.isEmpty {
+                let newPowerSave = (psMode == "1")
+                if newPowerSave != powerSaveEnabled { powerSaveEnabled = newPowerSave }
+            }
             powerSaveLoaded = true
+
+            let fbMode = psData["quicken_power_on"] as? String ?? ""
+            if !fbMode.isEmpty {
+                let newFastBoot = (fbMode == "1")
+                if newFastBoot != fastBootEnabled { fastBootEnabled = newFastBoot }
+            }
+            fastBootLoaded = true
         } catch {
-            showMessage("Failed to load power-save status", isError: true)
+            showMessage("Failed to load device manager settings", isError: true)
         }
     }
 
@@ -85,6 +100,25 @@ final class DeviceControlViewModel {
             showMessage(enabled ? "Power-save mode enabled" : "Power-save mode disabled", isError: false)
         } catch {
             powerSaveEnabled = !enabled
+            showMessage("Failed: \(error.localizedDescription)", isError: true)
+        }
+        isLoading = false
+    }
+
+    func setFastBoot(enabled: Bool) async {
+        guard fastBootLoaded else { return }
+        isLoading = true
+        let token = authManager.sessionToken
+        do {
+            let (_, _) = try await client.call(
+                sessionToken: token,
+                object: "zwrt_mc.device.manager",
+                method: "set_device_info",
+                params: ["deviceInfoList": ["quicken_power_on": enabled ? "1" : "0"]]
+            )
+            showMessage(enabled ? "Fast boot enabled" : "Fast boot disabled", isError: false)
+        } catch {
+            fastBootEnabled = !enabled
             showMessage("Failed: \(error.localizedDescription)", isError: true)
         }
         isLoading = false

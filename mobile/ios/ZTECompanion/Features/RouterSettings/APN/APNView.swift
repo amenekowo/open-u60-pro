@@ -2,6 +2,7 @@ import SwiftUI
 
 struct APNView: View {
     @Bindable var viewModel: APNViewModel
+    @State private var showAutoDetail: APNProfile?
 
     var body: some View {
         List {
@@ -10,6 +11,18 @@ struct APNView: View {
                     Text(msg)
                         .font(.subheadline)
                         .foregroundStyle(viewModel.messageIsError ? .red : .green)
+                }
+            }
+
+            if let activeName = viewModel.activeAPNName {
+                Section("Current APN") {
+                    HStack {
+                        Text(activeName)
+                            .font(.headline)
+                        Spacer()
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    }
                 }
             }
 
@@ -24,54 +37,53 @@ struct APNView: View {
             if viewModel.config.isManual {
                 Section {
                     Button {
-                        viewModel.newProfile = .empty
-                        viewModel.showAddSheet = true
+                        viewModel.startAdd()
                     } label: {
                         Label("Add APN", systemImage: "plus")
                     }
                 } header: {
-                    Text("Profiles")
+                    Text("Manual Profiles")
                 }
 
                 if !viewModel.config.profiles.isEmpty {
                     Section {
                         ForEach(viewModel.config.profiles) { profile in
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text(profile.name.isEmpty ? "Unnamed" : profile.name)
-                                        .font(.headline)
-                                    Spacer()
-                                    if profile.active {
-                                        Text("Active")
-                                            .font(.caption)
-                                            .foregroundStyle(.green)
-                                    }
+                            APNProfileRow(profile: profile)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    viewModel.startEdit(profile)
                                 }
-                                Text(profile.apn)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                Text("\(profile.pdpType) / \(profile.authMode)")
-                                    .font(.caption)
-                                    .foregroundStyle(.tertiary)
-                            }
-                            .padding(.vertical, 2)
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    Task { await viewModel.deleteAPN(profile) }
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
-                            .swipeActions(edge: .leading) {
-                                if !profile.active {
-                                    Button {
-                                        Task { await viewModel.activateAPN(profile) }
+                                .swipeActions(edge: .trailing) {
+                                    Button(role: .destructive) {
+                                        Task { await viewModel.deleteAPN(profile) }
                                     } label: {
-                                        Label("Activate", systemImage: "checkmark.circle")
+                                        Label("Delete", systemImage: "trash")
                                     }
-                                    .tint(.green)
+                                    .disabled(profile.active)
                                 }
-                            }
+                                .swipeActions(edge: .leading) {
+                                    if !profile.active {
+                                        Button {
+                                            Task { await viewModel.activateAPN(profile) }
+                                        } label: {
+                                            Label("Activate", systemImage: "checkmark.circle")
+                                        }
+                                        .tint(.green)
+                                    }
+                                }
+                        }
+                    }
+                }
+            } else {
+                // Auto mode: show auto profiles read-only
+                if !viewModel.config.autoProfiles.isEmpty {
+                    Section("Auto Profiles") {
+                        ForEach(viewModel.config.autoProfiles) { profile in
+                            APNProfileRow(profile: profile)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    showAutoDetail = profile
+                                }
                         }
                     }
                 }
@@ -83,15 +95,48 @@ struct APNView: View {
             if viewModel.isLoading {
                 ProgressView()
                     .padding()
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                    .background(Color(.systemBackground).opacity(0.85), in: RoundedRectangle(cornerRadius: 8))
             }
         }
         .task { await viewModel.refresh() }
-        .sheet(isPresented: $viewModel.showAddSheet) {
+        .sheet(isPresented: $viewModel.showFormSheet) {
             APNFormSheet(viewModel: viewModel)
+        }
+        .sheet(item: $showAutoDetail) { profile in
+            APNAutoDetailSheet(profile: profile)
         }
     }
 }
+
+// MARK: - Profile Row
+
+private struct APNProfileRow: View {
+    let profile: APNProfile
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(profile.name.isEmpty ? "Unnamed" : profile.name)
+                    .font(.headline)
+                Spacer()
+                if profile.active {
+                    Text("Active")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                }
+            }
+            Text(profile.apn)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Text("\(profile.pdpTypeLabel) / \(profile.authModeLabel)")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+// MARK: - Add/Edit Form Sheet
 
 struct APNFormSheet: View {
     @Bindable var viewModel: APNViewModel
@@ -101,50 +146,95 @@ struct APNFormSheet: View {
         NavigationStack {
             Form {
                 Section("Profile") {
-                    TextField("Name", text: $viewModel.newProfile.name)
-                    TextField("APN", text: $viewModel.newProfile.apn)
+                    TextField("Name", text: $viewModel.formProfile.name)
+                    TextField("APN", text: $viewModel.formProfile.apn)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                 }
 
                 Section("Connection") {
-                    Picker("PDP Type", selection: $viewModel.newProfile.pdpType) {
-                        ForEach(APNProfile.pdpTypeOptions, id: \.self) { type in
-                            Text(type).tag(type)
+                    Picker("PDP Type", selection: $viewModel.formProfile.pdpType) {
+                        ForEach(APNProfile.pdpTypeOptions, id: \.value) { opt in
+                            Text(opt.label).tag(opt.value)
                         }
                     }
 
-                    Picker("Auth Mode", selection: $viewModel.newProfile.authMode) {
-                        ForEach(APNProfile.authModeOptions, id: \.self) { mode in
-                            Text(mode).tag(mode)
+                    Picker("Auth Mode", selection: $viewModel.formProfile.authMode) {
+                        ForEach(APNProfile.authModeOptions, id: \.value) { opt in
+                            Text(opt.label).tag(opt.value)
                         }
                     }
                 }
 
-                if viewModel.newProfile.authMode != "none" {
+                if viewModel.formProfile.authMode != 0 {
                     Section("Credentials") {
-                        TextField("Username", text: $viewModel.newProfile.username)
+                        TextField("Username", text: $viewModel.formProfile.username)
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
-                        SecureField("Password", text: $viewModel.newProfile.password)
+                        SecureField("Password", text: $viewModel.formProfile.password)
                     }
                 }
 
                 Section {
+                    Toggle("Set as Default", isOn: $viewModel.setAsDefault)
+                }
+
+                Section {
                     Button {
-                        Task { await viewModel.addAPN() }
+                        Task { await viewModel.saveAPN() }
                     } label: {
-                        Text("Add APN")
+                        Text(viewModel.isEditing ? "Save" : "Add APN")
                             .frame(maxWidth: .infinity)
                     }
-                    .disabled(viewModel.newProfile.name.isEmpty || viewModel.newProfile.apn.isEmpty || viewModel.isLoading)
+                    .disabled(
+                        viewModel.formProfile.name.isEmpty
+                        || viewModel.formProfile.apn.isEmpty
+                        || viewModel.isLoading
+                    )
                 }
             }
-            .navigationTitle("New APN")
+            .navigationTitle(viewModel.isEditing ? "Edit APN" : "New APN")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Auto APN Detail (Read-Only)
+
+struct APNAutoDetailSheet: View {
+    let profile: APNProfile
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Profile") {
+                    LabeledContent("Name", value: profile.name.isEmpty ? "—" : profile.name)
+                    LabeledContent("APN", value: profile.apn.isEmpty ? "—" : profile.apn)
+                }
+                Section("Connection") {
+                    LabeledContent("PDP Type", value: profile.pdpTypeLabel)
+                    LabeledContent("Auth Mode", value: profile.authModeLabel)
+                }
+                if profile.authMode != 0 {
+                    Section("Credentials") {
+                        LabeledContent("Username", value: profile.username.isEmpty ? "—" : profile.username)
+                    }
+                }
+                Section {
+                    LabeledContent("Status", value: profile.active ? "Active" : "Inactive")
+                }
+            }
+            .navigationTitle("Auto APN")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
                 }
             }
         }

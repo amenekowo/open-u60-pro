@@ -26,11 +26,10 @@ final class DeviceInfoViewModel {
         async let wanTask = fetchWANStatus(token: token)
         async let wan6Task = fetchWAN6Status(token: token)
         async let lanTask = fetchLANStatus(token: token)
-        async let apnTask = fetchAPN(token: token)
         async let signalTask = fetchSignalInfo(token: token)
 
-        let (simInfo, imeiData, wanStatus, wan6Status, lanStatus, apnData, signalInfo) =
-            await (simTask, imeiTask, wanTask, wan6Task, lanTask, apnTask, signalTask)
+        let (simInfo, imeiData, wanStatus, wan6Status, lanStatus, signalInfo) =
+            await (simTask, imeiTask, wanTask, wan6Task, lanTask, signalTask)
 
         identity = DeviceParser.parseIdentity(
             simInfo: simInfo ?? [:],
@@ -39,9 +38,6 @@ final class DeviceInfoViewModel {
             wan6Status: wan6Status ?? [:],
             lanStatus: lanStatus ?? [:]
         )
-        if let apnData {
-            identity.wanAPN = DeviceParser.parseAPN(apnData)
-        }
         if let signalInfo {
             operatorInfo = signalInfo
         }
@@ -96,16 +92,6 @@ final class DeviceInfoViewModel {
             let (_, data) = try await client.call(
                 sessionToken: token, object: "network.interface.lan",
                 method: "status", params: [:]
-            )
-            return data
-        } catch { return nil }
-    }
-
-    private func fetchAPN(token: String) async -> [String: Any]? {
-        do {
-            let (_, data) = try await client.call(
-                sessionToken: token, object: "zwrt_web",
-                method: "web_api_telus_para_get", params: [:]
             )
             return data
         } catch { return nil }

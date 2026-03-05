@@ -4,50 +4,38 @@ struct DeviceInfoView: View {
     var viewModel: DeviceInfoViewModel
 
     var body: some View {
-        NavigationStack {
-            List {
-                Section("SIM Card") {
-                    infoRow("ICCID", viewModel.identity.simICCID)
-                    infoRow("IMSI", viewModel.identity.simIMSI)
-                    infoRow("MSISDN", viewModel.identity.msisdn)
-                    infoRow("SPN", viewModel.identity.spn)
-                    mccMncRow
-                    simStatusRow
-                }
+        List {
+            Section("Device") {
+                infoRow("IMEI", viewModel.identity.imei)
+            }
 
-                Section("Device") {
-                    infoRow("IMEI", viewModel.identity.imei)
-                }
+            Section("Network") {
+                roamingRow
+                signalBarsRow
+            }
 
-                Section("Network") {
-                    roamingRow
-                    infoRow("APN", viewModel.identity.wanAPN)
-                    signalBarsRow
+            Section("WAN") {
+                infoRow("IPv4", viewModel.identity.wanIPv4)
+                ForEach(viewModel.identity.wanIPv6, id: \.self) { addr in
+                    infoRow("IPv6", addr)
                 }
-
-                Section("WAN") {
-                    infoRow("IPv4", viewModel.identity.wanIPv4)
-                    ForEach(viewModel.identity.wanIPv6, id: \.self) { addr in
-                        infoRow("IPv6", addr)
-                    }
-                    if viewModel.identity.wanIPv6.isEmpty {
-                        infoRow("IPv6", "")
-                    }
-                }
-
-                Section("LAN") {
-                    infoRow("Gateway", viewModel.identity.lanIP)
+                if viewModel.identity.wanIPv6.isEmpty {
+                    infoRow("IPv6", "")
                 }
             }
-            .navigationTitle("Device Info")
-            .refreshable { await viewModel.refresh() }
-            .overlay {
-                if viewModel.isLoading {
-                    ProgressView()
-                }
+
+            Section("LAN") {
+                infoRow("Gateway", viewModel.identity.lanIP)
             }
-            .task { await viewModel.refresh() }
         }
+        .navigationTitle("Device Info")
+        .refreshable { await viewModel.refresh() }
+        .overlay {
+            if viewModel.isLoading {
+                ProgressView()
+            }
+        }
+        .task { await viewModel.refresh() }
     }
 
     // MARK: - Rows
@@ -60,27 +48,6 @@ struct DeviceInfoView: View {
             Text(value.isEmpty ? "--" : value)
                 .font(.body.monospacedDigit())
                 .textSelection(.enabled)
-        }
-    }
-
-    private var mccMncRow: some View {
-        let mcc = viewModel.identity.mcc
-        let mnc = viewModel.identity.mnc
-        let value = (mcc.isEmpty && mnc.isEmpty) ? "" : "\(mcc)/\(mnc)"
-        return infoRow("MCC/MNC", value)
-    }
-
-    private var simStatusRow: some View {
-        let raw = viewModel.identity.simStatus
-        let label = simStatusLabel(raw)
-        let color = simStatusColor(raw)
-        return HStack {
-            Text("SIM Status")
-                .foregroundStyle(.secondary)
-            Spacer()
-            Text(label)
-                .font(.body.monospacedDigit())
-                .foregroundStyle(color)
         }
     }
 
@@ -118,28 +85,6 @@ struct DeviceInfoView: View {
     }
 
     // MARK: - Helpers
-
-    private func simStatusLabel(_ raw: String) -> String {
-        switch raw.lowercased() {
-        case "", "unknown": return "--"
-        case "ready", "sim_ready": return "Ready"
-        case "not_inserted", "no_sim", "sim_absent": return "No SIM"
-        case "pin_required", "sim_pin": return "PIN Required"
-        case "puk_required", "sim_puk": return "PUK Required"
-        case "error", "sim_error": return "Error"
-        default: return raw
-        }
-    }
-
-    private func simStatusColor(_ raw: String) -> Color {
-        switch raw.lowercased() {
-        case "ready", "sim_ready": return .green
-        case "not_inserted", "no_sim", "sim_absent": return .red
-        case "pin_required", "sim_pin", "puk_required", "sim_puk": return .orange
-        case "error", "sim_error": return .red
-        default: return .secondary
-        }
-    }
 
     private func signalColor(bars: Int, max: Int) -> Color {
         let ratio = Double(bars) / Double(max)

@@ -6,7 +6,9 @@ use serde_json::json;
 use zte_lib::adb::AdbDevice;
 use zte_lib::ubus::UbusClient;
 
-use super::ssh;
+use zte_lib::device::DeviceShell;
+
+use super::{acl, companion, ssh};
 
 #[derive(ClapArgs)]
 pub struct Args {
@@ -115,6 +117,34 @@ pub fn run(args: Args) -> Result<()> {
     println!("{} Verifying SSH...", "Step 9:".bold());
     ssh::verify_ssh(&adb, args.port);
 
+    // Step 10: Patch ACL
+    println!("{} Patching ubus HTTP ACL...", "Step 10:".bold());
+    let dev = DeviceShell::Adb(AdbDevice::new(None));
+    match acl::patch_acl_on_device(&dev, Some(&password), args.gateway.as_deref(), false) {
+        Ok(_) => println!("  {}", "ACL patched.".green()),
+        Err(e) => println!(
+            "  {} ACL patch failed (non-fatal): {e}",
+            "!".yellow()
+        ),
+    }
+
+    // Step 11: Install companion plugin
+    println!("{} Installing companion plugin...", "Step 11:".bold());
+    match companion::install_companion_on_device(&dev, Some(&password), args.gateway.as_deref(), false) {
+        Ok(_) => println!("  {}", "Companion installed.".green()),
+        Err(e) => println!(
+            "  {} Companion install failed (non-fatal): {e}",
+            "!".yellow()
+        ),
+    }
+
+    // Step 12: Single rpcd restart (covers both ACL and companion changes)
+    println!("{} Restarting rpcd...", "Step 12:".bold());
+    match dev.shell("/etc/init.d/rpcd restart", 10) {
+        Ok(_) => println!("  {} rpcd restarted.", "OK".green()),
+        Err(e) => println!("  {} rpcd restart failed: {e}", "!".yellow()),
+    }
+
     // Connection instructions
     println!();
     let device_ip = ssh::get_device_ip(&adb);
@@ -127,7 +157,7 @@ pub fn run(args: Args) -> Result<()> {
     println!();
     println!(
         "{}",
-        "Done. SSH access is enabled on the device.".bold().green()
+        "Done. Full provisioning complete (SSH + ACL + Companion).".bold().green()
     );
     Ok(())
 }

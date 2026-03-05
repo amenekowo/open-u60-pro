@@ -83,7 +83,7 @@ struct SettingsView: View {
             .font(.subheadline.weight(.medium))
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+            .background(Color(.systemBackground).opacity(0.85), in: RoundedRectangle(cornerRadius: 10))
             .transition(.move(edge: .top).combined(with: .opacity))
             .task {
                 try? await Task.sleep(for: .seconds(1.5))

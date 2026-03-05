@@ -29,6 +29,22 @@ pub enum Cmd {
     },
     /// Trigger manual network scan
     Scan(TransportArgs),
+    /// Show mobile data status (connect mode, roaming, enabled)
+    DataStatus(TransportArgs),
+    /// Enable mobile data
+    DataOn {
+        #[command(flatten)]
+        transport: TransportArgs,
+        #[arg(long)]
+        confirm: bool,
+    },
+    /// Disable mobile data
+    DataOff {
+        #[command(flatten)]
+        transport: TransportArgs,
+        #[arg(long)]
+        confirm: bool,
+    },
 }
 
 pub fn run(cmd: Cmd) -> Result<()> {
@@ -39,6 +55,7 @@ pub fn run(cmd: Cmd) -> Result<()> {
             print_kv(
                 &nw,
                 &[
+                    "operate_mode",
                     "net_select", "net_select_mode", "network_type",
                     "wan_active_band", "network_provider", "mcc", "mnc",
                     "nr5g_pci", "nr5g_rsrp", "nr5g_snr",
@@ -80,6 +97,54 @@ pub fn run(cmd: Cmd) -> Result<()> {
             } else {
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
+            Ok(())
+        }
+        Cmd::DataStatus(args) => {
+            let t = get_transport(&args)?;
+            let data = t.ubus_call("zwrt_data", "get_wwaniface", Some(&json!({"cid": 1})));
+            print_kv(
+                &data,
+                &["connect_mode", "roam_enable", "enable", "connect_status"],
+                Some("Mobile Data"),
+            );
+            Ok(())
+        }
+        Cmd::DataOn { transport, confirm } => {
+            confirm_guard(confirm, "enable mobile data")?;
+            let t = get_transport(&transport)?;
+            let current = t.ubus_call("zwrt_data", "get_wwaniface", Some(&json!({"cid": 1})));
+            let connect_mode = current.get("connect_mode").and_then(|v| v.as_i64()).unwrap_or(0);
+            let roam_enable = current.get("roam_enable").and_then(|v| v.as_i64()).unwrap_or(0);
+            t.ubus_call(
+                "zwrt_data",
+                "set_wwaniface",
+                Some(&json!({
+                    "cid": 1,
+                    "connect_mode": connect_mode,
+                    "roam_enable": roam_enable,
+                    "enable": 1
+                })),
+            );
+            println!("{}", "Mobile data enabled.".green());
+            Ok(())
+        }
+        Cmd::DataOff { transport, confirm } => {
+            confirm_guard(confirm, "disable mobile data")?;
+            let t = get_transport(&transport)?;
+            let current = t.ubus_call("zwrt_data", "get_wwaniface", Some(&json!({"cid": 1})));
+            let connect_mode = current.get("connect_mode").and_then(|v| v.as_i64()).unwrap_or(0);
+            let roam_enable = current.get("roam_enable").and_then(|v| v.as_i64()).unwrap_or(0);
+            t.ubus_call(
+                "zwrt_data",
+                "set_wwaniface",
+                Some(&json!({
+                    "cid": 1,
+                    "connect_mode": connect_mode,
+                    "roam_enable": roam_enable,
+                    "enable": 0
+                })),
+            );
+            println!("{}", "Mobile data disabled.".green());
             Ok(())
         }
     }

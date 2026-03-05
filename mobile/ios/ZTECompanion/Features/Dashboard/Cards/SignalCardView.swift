@@ -4,6 +4,7 @@ struct SignalCardView: View {
     let operatorInfo: OperatorInfo
     let nrSignal: NRSignal
     let lteSignal: LTESignal
+    var isAirplaneMode: Bool = false
 
     var body: some View {
         let showNR = operatorInfo.showNR(nr: nrSignal)
@@ -19,14 +20,16 @@ struct SignalCardView: View {
                         icon: "antenna.radiowaves.left.and.right", tech: "5G NR",
                         band: nrSignal.band, freq: BandConfig.nrFrequency(band: nrSignal.band),
                         technology: .nr, bandwidth: nrSignal.bandwidth,
-                        isSCC: false, rsrp: nrSignal.rsrp, sinr: nrSignal.sinr
+                        isSCC: false, rsrp: nrSignal.rsrp, sinr: nrSignal.sinr,
+                        pci: nrSignal.pci
                     )
                     ForEach(nrSignal.sccCarriers) { scc in
                         carrierRow(
                             icon: "antenna.radiowaves.left.and.right", tech: "5G NR",
                             band: scc.band, freq: BandConfig.nrFrequency(band: scc.band),
                             technology: .nr, bandwidth: scc.bandwidth,
-                            isSCC: true, rsrp: scc.rsrp, sinr: scc.sinr
+                            isSCC: true, rsrp: scc.rsrp, sinr: scc.sinr,
+                            pci: scc.pci
                         )
                     }
                 }
@@ -37,7 +40,8 @@ struct SignalCardView: View {
                         icon: "cellularbars", tech: "LTE",
                         band: lteSignal.band, freq: BandConfig.lteFrequency(band: lteSignal.band),
                         technology: .lte, bandwidth: lteSignal.bandwidth,
-                        isSCC: false, rsrp: lteSignal.rsrp, sinr: lteSignal.sinr
+                        isSCC: false, rsrp: lteSignal.rsrp, sinr: lteSignal.sinr,
+                        pci: lteSignal.pci
                     )
                     if lteSignal.caState != "0" {
                         ForEach(lteSignal.sccCarriers) { scc in
@@ -45,18 +49,29 @@ struct SignalCardView: View {
                                 icon: "cellularbars", tech: "LTE",
                                 band: scc.band, freq: BandConfig.lteFrequency(band: scc.band),
                                 technology: .lte, bandwidth: scc.bandwidth,
-                                isSCC: true, rsrp: scc.rsrp, sinr: scc.sinr
+                                isSCC: true, rsrp: scc.rsrp, sinr: scc.sinr,
+                                pci: scc.pci
                             )
                         }
                     }
                 }
 
                 if !showNR && !showLTE {
-                    Text("No signal data")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .foregroundStyle(.secondary)
+                    if isAirplaneMode {
+                        Label("Airplane Mode", systemImage: "airplane")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("No signal data")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
+            .animation(.smooth, value: nrSignal.sccCarriers.map(\.id))
+            .animation(.smooth, value: lteSignal.sccCarriers.map(\.id))
+            .animation(.smooth, value: showNR)
+            .animation(.smooth, value: showLTE)
         }
     }
 
@@ -64,7 +79,7 @@ struct SignalCardView: View {
     private func carrierRow(
         icon: String, tech: String, band: String, freq: String?,
         technology: BandTechnology, bandwidth: String,
-        isSCC: Bool, rsrp: Double?, sinr: Double?
+        isSCC: Bool, rsrp: Double?, sinr: Double?, pci: String
     ) -> some View {
         let spec = technology.spec(for: band)
         VStack(alignment: .leading, spacing: 4) {
@@ -111,7 +126,13 @@ struct SignalCardView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            if !pci.isEmpty {
+                Text("PCI \(pci)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
+        .transition(.opacity.combined(with: .move(edge: .top)))
     }
 
     private func bandwidthText(bandwidth: String, spec: BandSpec?) -> String? {

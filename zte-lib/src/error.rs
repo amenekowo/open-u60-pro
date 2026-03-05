@@ -46,7 +46,7 @@ pub enum ZteError {
     Config(String),
 
     #[error("HTTP error: {0}")]
-    Http(#[from] reqwest::Error),
+    Http(String),
 
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),

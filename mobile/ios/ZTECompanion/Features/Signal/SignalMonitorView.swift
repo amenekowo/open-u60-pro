@@ -17,28 +17,26 @@ struct SignalMonitorView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    rsrpChart
-                    if showNR { nrPanel }
-                    if showLTE { ltePanel }
-                    if show3G { wcdmaPanel }
-                }
-                .padding()
+        ScrollView {
+            VStack(spacing: 16) {
+                rsrpChart
+                if showNR { nrPanel }
+                if showLTE { ltePanel }
+                if show3G { wcdmaPanel }
             }
-            .navigationTitle("Signal Monitor")
-            .refreshable { await viewModel.refresh() }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    LastUpdatedView(date: viewModel.lastUpdated)
-                }
+            .padding()
+        }
+        .navigationTitle("Signal Monitor")
+        .refreshable { await viewModel.refresh() }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                LastUpdatedView(date: viewModel.lastUpdated)
             }
-            .task {
-                viewModel.startPolling()
-                defer { viewModel.stopPolling() }
-                try? await Task.sleep(for: .seconds(86400 * 365))
-            }
+        }
+        .task {
+            viewModel.startPolling()
+            defer { viewModel.stopPolling() }
+            try? await Task.sleep(for: .seconds(86400 * 365))
         }
     }
 

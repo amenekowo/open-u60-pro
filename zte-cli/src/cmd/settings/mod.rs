@@ -8,6 +8,7 @@ pub mod qos;
 pub mod vpn;
 pub mod lan;
 pub mod device;
+pub mod display;
 pub mod schedule;
 
 use anyhow::Result;
@@ -50,6 +51,9 @@ pub enum Cmd {
     /// Device hardware controls (USB, reboot, factory reset)
     #[command(subcommand)]
     Device(device::Cmd),
+    /// Display and backlight settings (brightness, timeout, night mode)
+    #[command(subcommand)]
+    Display(display::Cmd),
     /// Scheduled events (reboot, wifi, mobile data)
     #[command(subcommand)]
     Schedule(schedule::Cmd),
@@ -67,6 +71,7 @@ pub fn run(cmd: Cmd) -> Result<()> {
         Cmd::Vpn(c) => vpn::run(c),
         Cmd::Lan(c) => lan::run(c),
         Cmd::Device(c) => device::run(c),
+        Cmd::Display(c) => display::run(c),
         Cmd::Schedule(c) => schedule::run(c),
     }
 }
@@ -114,11 +119,15 @@ pub fn print_kv(data: &Value, keys: &[&str], title: Option<&str>) {
         table.set_header(vec![t, ""]);
     }
     for &key in keys {
-        let val = data
-            .get(key)
-            .and_then(|v| v.as_str())
-            .unwrap_or("--");
-        table.add_row(vec![key, val]);
+        let val = match data.get(key) {
+            Some(Value::String(s)) => s.clone(),
+            Some(Value::Number(n)) => n.to_string(),
+            Some(Value::Bool(b)) => b.to_string(),
+            Some(Value::Null) => "--".into(),
+            Some(other) => other.to_string(),
+            None => "--".into(),
+        };
+        table.add_row(vec![key, &val]);
     }
     println!("{table}");
 }

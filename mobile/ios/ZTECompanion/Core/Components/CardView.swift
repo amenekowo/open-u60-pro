@@ -10,6 +10,6 @@ struct CardView<Content: View>: View {
     var body: some View {
         content
             .padding()
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 }

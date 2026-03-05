@@ -28,7 +28,9 @@ const UNLOCK_OBJECTS: &[(&str, &[&str])] = &[
     ("zwrt_bsp.charger", &["*"]),
     ("zwrt_bsp.thermal", &["*"]),
     ("zwrt_mc.device.manager", &["get_device_info", "set_device_info"]),
-    ("zte-companion", &["battery_current", "cpu_usage"]),
+    ("zwrt_data", &["*"]),
+    ("zte_nwinfo_api", &["*"]),
+    ("zte-companion", &["*"]),
 ];
 
 /// Objects to add to the `unauthenticated.read.ubus` ACL section.
@@ -45,7 +47,9 @@ const UNAUTH_UNLOCK_OBJECTS: &[(&str, &[&str])] = &[
     ("network.interface.zte_wan6", &["*"]),
     ("luci-rpc", &["*"]),
     ("zwrt_mc.device.manager", &["get_device_info", "set_device_info"]),
-    ("zte-companion", &["battery_current", "cpu_usage"]),
+    ("zwrt_data", &["*"]),
+    ("zte_nwinfo_api", &["*"]),
+    ("zte-companion", &["*"]),
 ];
 
 #[derive(Subcommand)]
@@ -170,28 +174,108 @@ fn run_show(shell: &ShellArgs) -> Result<()> {
         );
     }
 
-    let missing_web = get_missing_for_scope(&acl, "/web/read/ubus", UNLOCK_OBJECTS);
-    let missing_unauth =
-        get_missing_for_scope(&acl, "/unauthenticated/read/ubus", UNAUTH_UNLOCK_OBJECTS);
+    // Show web.write.ubus
+    if let Some(ubus_obj) = acl.pointer("/web/write/ubus") {
+        println!("\n  {}", "Allowed ubus objects (web.write.ubus):".bold());
+        if let Value::Object(map) = ubus_obj {
+            for (obj_name, methods) in map {
+                let methods_str = match methods {
+                    Value::Array(arr) => arr
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    _ => format!("{methods}"),
+                };
+                let is_unlock_target = UNLOCK_OBJECTS.iter().any(|(name, _)| name == obj_name);
+                if is_unlock_target {
+                    println!("    {} [{}]", obj_name.green(), methods_str);
+                } else {
+                    println!("    {obj_name} [{methods_str}]");
+                }
+            }
+        }
+    } else {
+        println!("\n  {} No web.write.ubus section found.", "!".yellow());
+    }
 
-    if missing_web.is_empty() && missing_unauth.is_empty() {
+    // Show unauthenticated.write.ubus
+    if let Some(ubus_obj) = acl.pointer("/unauthenticated/write/ubus") {
+        println!(
+            "\n  {}",
+            "Allowed ubus objects (unauthenticated.write.ubus):".bold()
+        );
+        if let Value::Object(map) = ubus_obj {
+            for (obj_name, methods) in map {
+                let methods_str = match methods {
+                    Value::Array(arr) => arr
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    _ => format!("{methods}"),
+                };
+                let is_unlock_target =
+                    UNAUTH_UNLOCK_OBJECTS.iter().any(|(name, _)| name == obj_name);
+                if is_unlock_target {
+                    println!("    {} [{}]", obj_name.green(), methods_str);
+                } else {
+                    println!("    {obj_name} [{methods_str}]");
+                }
+            }
+        }
+    } else {
+        println!(
+            "\n  {} No unauthenticated.write.ubus section found.",
+            "!".yellow()
+        );
+    }
+
+    let missing_web_read = get_missing_for_scope(&acl, "/web/read/ubus", UNLOCK_OBJECTS);
+    let missing_unauth_read =
+        get_missing_for_scope(&acl, "/unauthenticated/read/ubus", UNAUTH_UNLOCK_OBJECTS);
+    let missing_web_write = get_missing_for_scope(&acl, "/web/write/ubus", UNLOCK_OBJECTS);
+    let missing_unauth_write =
+        get_missing_for_scope(&acl, "/unauthenticated/write/ubus", UNAUTH_UNLOCK_OBJECTS);
+
+    let all_good = missing_web_read.is_empty()
+        && missing_unauth_read.is_empty()
+        && missing_web_write.is_empty()
+        && missing_unauth_write.is_empty();
+
+    if all_good {
         println!(
             "\n  {}",
             "All target objects are already unlocked.".green()
         );
     } else {
-        if !missing_web.is_empty() {
+        if !missing_web_read.is_empty() {
             println!("\n  {} Missing from web.read.ubus:", "!".yellow());
-            for (obj, _) in &missing_web {
+            for (obj, _) in &missing_web_read {
                 println!("    {} {obj}", "-".red());
             }
         }
-        if !missing_unauth.is_empty() {
+        if !missing_unauth_read.is_empty() {
             println!(
                 "\n  {} Missing from unauthenticated.read.ubus:",
                 "!".yellow()
             );
-            for (obj, _) in &missing_unauth {
+            for (obj, _) in &missing_unauth_read {
+                println!("    {} {obj}", "-".red());
+            }
+        }
+        if !missing_web_write.is_empty() {
+            println!("\n  {} Missing from web.write.ubus:", "!".yellow());
+            for (obj, _) in &missing_web_write {
+                println!("    {} {obj}", "-".red());
+            }
+        }
+        if !missing_unauth_write.is_empty() {
+            println!(
+                "\n  {} Missing from unauthenticated.write.ubus:",
+                "!".yellow()
+            );
+            for (obj, _) in &missing_unauth_write {
                 println!("    {} {obj}", "-".red());
             }
         }
@@ -203,11 +287,20 @@ fn run_show(shell: &ShellArgs) -> Result<()> {
 }
 
 fn run_patch(shell: &ShellArgs) -> Result<()> {
-    let password = shell.password.clone();
-    let gateway = shell.gateway.clone();
     let dev = shell.connect()?;
     println!("\n  {}\n", "ACL — Patching ubus HTTP ACL".bold());
+    patch_acl_on_device(&dev, shell.password.as_deref(), shell.gateway.as_deref(), true)?;
+    println!();
+    Ok(())
+}
 
+/// Patch ACL on a pre-connected device. Returns Ok(true) if changes were made.
+pub(crate) fn patch_acl_on_device(
+    dev: &DeviceShell,
+    password: Option<&str>,
+    gateway: Option<&str>,
+    restart_rpcd: bool,
+) -> Result<bool> {
     // Read current ACL (follows symlink)
     let raw = dev.shell(&format!("cat {ACL_PATH}"), 5)?;
     let trimmed = raw.trim();
@@ -218,29 +311,36 @@ fn run_patch(shell: &ShellArgs) -> Result<()> {
     let mut acl: Value = serde_json::from_str(trimmed)
         .map_err(|e| anyhow::anyhow!("Failed to parse ACL JSON: {e}"))?;
 
-    let missing_web = get_missing_for_scope(&acl, "/web/read/ubus", UNLOCK_OBJECTS);
-    let missing_unauth =
+    let missing_web_read = get_missing_for_scope(&acl, "/web/read/ubus", UNLOCK_OBJECTS);
+    let missing_unauth_read =
         get_missing_for_scope(&acl, "/unauthenticated/read/ubus", UNAUTH_UNLOCK_OBJECTS);
+    let missing_web_write = get_missing_for_scope(&acl, "/web/write/ubus", UNLOCK_OBJECTS);
+    let missing_unauth_write =
+        get_missing_for_scope(&acl, "/unauthenticated/write/ubus", UNAUTH_UNLOCK_OBJECTS);
 
-    if missing_web.is_empty() && missing_unauth.is_empty() {
+    if missing_web_read.is_empty()
+        && missing_unauth_read.is_empty()
+        && missing_web_write.is_empty()
+        && missing_unauth_write.is_empty()
+    {
         println!(
             "  {}",
             "All target objects are already unlocked. Nothing to do.".green()
         );
-        return Ok(());
+        return Ok(false);
     }
 
     // Patch web.read.ubus
-    if !missing_web.is_empty() {
-        println!("  Adding {} objects to web.read.ubus:", missing_web.len());
-        for (obj, methods) in &missing_web {
+    if !missing_web_read.is_empty() {
+        println!("  Adding {} objects to web.read.ubus:", missing_web_read.len());
+        for (obj, methods) in &missing_web_read {
             println!("    {} {obj} [{}]", "+".green(), methods.join(", "));
         }
         let ubus_obj = acl
             .pointer_mut("/web/read/ubus")
             .ok_or_else(|| anyhow::anyhow!("No web.read.ubus section in ACL"))?;
         if let Value::Object(map) = ubus_obj {
-            for (obj_name, methods) in &missing_web {
+            for (obj_name, methods) in &missing_web_read {
                 let method_values: Vec<Value> = methods.iter().map(|m| json!(m)).collect();
                 map.insert(obj_name.to_string(), Value::Array(method_values));
             }
@@ -248,12 +348,12 @@ fn run_patch(shell: &ShellArgs) -> Result<()> {
     }
 
     // Patch unauthenticated.read.ubus
-    if !missing_unauth.is_empty() {
+    if !missing_unauth_read.is_empty() {
         println!(
             "\n  Adding {} objects to unauthenticated.read.ubus:",
-            missing_unauth.len()
+            missing_unauth_read.len()
         );
-        for (obj, methods) in &missing_unauth {
+        for (obj, methods) in &missing_unauth_read {
             println!("    {} {obj} [{}]", "+".green(), methods.join(", "));
         }
         // Ensure unauthenticated.read.ubus exists
@@ -270,7 +370,61 @@ fn run_patch(shell: &ShellArgs) -> Result<()> {
             .pointer_mut("/unauthenticated/read/ubus")
             .expect("just created unauthenticated.read.ubus");
         if let Value::Object(map) = ubus_obj {
-            for (obj_name, methods) in &missing_unauth {
+            for (obj_name, methods) in &missing_unauth_read {
+                let method_values: Vec<Value> = methods.iter().map(|m| json!(m)).collect();
+                map.insert(obj_name.to_string(), Value::Array(method_values));
+            }
+        }
+    }
+
+    // Patch web.write.ubus
+    if !missing_web_write.is_empty() {
+        println!(
+            "\n  Adding {} objects to web.write.ubus:",
+            missing_web_write.len()
+        );
+        for (obj, methods) in &missing_web_write {
+            println!("    {} {obj} [{}]", "+".green(), methods.join(", "));
+        }
+        // Ensure web.write.ubus exists
+        if acl.pointer("/web/write").is_none() {
+            acl["web"]["write"] = json!({});
+        }
+        if acl.pointer("/web/write/ubus").is_none() {
+            acl["web"]["write"]["ubus"] = json!({});
+        }
+        let ubus_obj = acl
+            .pointer_mut("/web/write/ubus")
+            .expect("just created web.write.ubus");
+        if let Value::Object(map) = ubus_obj {
+            for (obj_name, methods) in &missing_web_write {
+                let method_values: Vec<Value> = methods.iter().map(|m| json!(m)).collect();
+                map.insert(obj_name.to_string(), Value::Array(method_values));
+            }
+        }
+    }
+
+    // Patch unauthenticated.write.ubus
+    if !missing_unauth_write.is_empty() {
+        println!(
+            "\n  Adding {} objects to unauthenticated.write.ubus:",
+            missing_unauth_write.len()
+        );
+        for (obj, methods) in &missing_unauth_write {
+            println!("    {} {obj} [{}]", "+".green(), methods.join(", "));
+        }
+        // Ensure unauthenticated.write.ubus exists
+        if acl.pointer("/unauthenticated/write").is_none() {
+            acl["unauthenticated"]["write"] = json!({});
+        }
+        if acl.pointer("/unauthenticated/write/ubus").is_none() {
+            acl["unauthenticated"]["write"]["ubus"] = json!({});
+        }
+        let ubus_obj = acl
+            .pointer_mut("/unauthenticated/write/ubus")
+            .expect("just created unauthenticated.write.ubus");
+        if let Value::Object(map) = ubus_obj {
+            for (obj_name, methods) in &missing_unauth_write {
                 let method_values: Vec<Value> = methods.iter().map(|m| json!(m)).collect();
                 map.insert(obj_name.to_string(), Value::Array(method_values));
             }
@@ -308,28 +462,23 @@ fn run_patch(shell: &ShellArgs) -> Result<()> {
     )?;
     println!("  {} Bind-mounted {ACL_OVERLAY_DIR} → {ACL_DIR}", "OK".green());
 
-    // Reload rpcd
-    println!("  Reloading rpcd...");
-    let reload_result = dev.shell("kill -HUP $(pidof rpcd)", 5);
-    match reload_result {
-        Ok(_) => println!("  {} rpcd reloaded.", "OK".green()),
-        Err(e) => {
-            println!(
-                "  {} HUP failed ({}), trying restart...",
-                "!".yellow(),
-                e
-            );
-            let _ = dev.shell("/etc/init.d/rpcd restart", 10);
+    if restart_rpcd {
+        // Full restart — HUP alone may not re-read ACL files on ZTE's rpcd
+        println!("  Restarting rpcd...");
+        let restart_result = dev.shell("/etc/init.d/rpcd restart", 10);
+        match restart_result {
+            Ok(_) => println!("  {} rpcd restarted.", "OK".green()),
+            Err(e) => println!("  {} rpcd restart failed: {e}", "!".yellow()),
         }
+
+        // Brief pause for rpcd to come back up
+        std::thread::sleep(std::time::Duration::from_secs(1));
     }
 
-    // Brief pause for rpcd to reload
-    std::thread::sleep(std::time::Duration::from_secs(1));
-
     // Verify via HTTP
-    if let Some(pw) = &password {
+    if let Some(pw) = password {
         println!("\n  Verifying via HTTP ubus call...");
-        let mut client = UbusClient::new(gateway.as_deref(), 10);
+        let mut client = UbusClient::new(gateway, 10);
         match client.login(pw) {
             Ok(_) => match client.call("network.device", "status", None) {
                 Ok(_) => println!(
@@ -352,10 +501,9 @@ fn run_patch(shell: &ShellArgs) -> Result<()> {
     }
 
     // Install boot persistence
-    install_boot_persistence(&dev);
+    install_boot_persistence(dev);
 
-    println!();
-    Ok(())
+    Ok(true)
 }
 
 fn run_reset(shell: &ShellArgs) -> Result<()> {
@@ -389,19 +537,12 @@ fn run_reset(shell: &ShellArgs) -> Result<()> {
     // Remove boot persistence
     remove_boot_persistence(&dev);
 
-    // Reload rpcd
-    println!("  Reloading rpcd...");
-    let reload_result = dev.shell("kill -HUP $(pidof rpcd)", 5);
-    match reload_result {
-        Ok(_) => println!("  {} rpcd reloaded.", "OK".green()),
-        Err(e) => {
-            println!(
-                "  {} HUP failed ({}), trying restart...",
-                "!".yellow(),
-                e
-            );
-            let _ = dev.shell("/etc/init.d/rpcd restart", 10);
-        }
+    // Full restart rpcd
+    println!("  Restarting rpcd...");
+    let restart_result = dev.shell("/etc/init.d/rpcd restart", 10);
+    match restart_result {
+        Ok(_) => println!("  {} rpcd restarted.", "OK".green()),
+        Err(e) => println!("  {} rpcd restart failed: {e}", "!".yellow()),
     }
 
     println!();
@@ -409,7 +550,7 @@ fn run_reset(shell: &ShellArgs) -> Result<()> {
 }
 
 /// Write a boot script and hook it into rc.local so the ACL bind-mount survives reboot.
-fn install_boot_persistence(dev: &DeviceShell) {
+pub(crate) fn install_boot_persistence(dev: &DeviceShell) {
     // Write the init script
     let script = "\
 #!/bin/sh\n\
@@ -417,7 +558,7 @@ fn install_boot_persistence(dev: &DeviceShell) {
 if [ -d /data/local/tmp/rpcd-acl.d ]; then\n\
   mount | grep -q '/usr/share/rpcd/acl.d' || {\n\
     mount --bind /data/local/tmp/rpcd-acl.d /usr/share/rpcd/acl.d\n\
-    kill -HUP $(pidof rpcd) 2>/dev/null\n\
+    /etc/init.d/rpcd restart 2>/dev/null\n\
   }\n\
 fi\n";
 
@@ -533,7 +674,7 @@ fn get_missing_for_scope(
 }
 
 /// Simple base64 encoder (avoids adding a dependency for this one use).
-fn base64_encode(data: &[u8]) -> String {
+pub(crate) fn base64_encode(data: &[u8]) -> String {
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut result = String::with_capacity((data.len() + 2) / 3 * 4);
     for chunk in data.chunks(3) {

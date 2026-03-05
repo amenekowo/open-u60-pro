@@ -37,6 +37,18 @@ struct RouterSettingsListView: View {
                     } label: {
                         Label("Signal Detection", systemImage: "waveform.badge.magnifyingglass")
                     }
+
+                    NavigationLink {
+                        SIMView(viewModel: SIMViewModel(client: client, authManager: authManager))
+                    } label: {
+                        Label("SIM Card", systemImage: "simcard.2")
+                    }
+
+                    NavigationLink {
+                        STKMenuView(viewModel: STKViewModel(client: client, authManager: authManager))
+                    } label: {
+                        Label("SIM Services", systemImage: "phone.badge.waveform")
+                    }
                 }
 
                 Section("Connectivity") {

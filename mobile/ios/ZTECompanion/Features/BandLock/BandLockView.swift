@@ -4,58 +4,56 @@ struct BandLockView: View {
     var viewModel: BandLockViewModel
 
     var body: some View {
-        NavigationStack {
-            List {
-                if let msg = viewModel.message {
-                    Section {
-                        Text(msg)
-                            .font(.subheadline)
-                            .foregroundStyle(viewModel.messageIsError ? .red : .green)
-                    }
-                }
-
+        List {
+            if let msg = viewModel.message {
                 Section {
-                    Button(role: .destructive) {
-                        Task { await viewModel.unlockAll() }
-                    } label: {
-                        Label("Unlock All Bands", systemImage: "lock.open")
-                    }
-                    .disabled(viewModel.isLoading)
-                }
-
-                Section("5G NR Bands") {
-                    bandGrid(bands: BandConfig.commonNRBands, selected: viewModel.config.nrBands, technology: .nr) {
-                        viewModel.toggleNRBand($0)
-                    }
-
-                    Button {
-                        Task { await viewModel.applyNRLock() }
-                    } label: {
-                        Label("Apply NR Lock", systemImage: "lock.fill")
-                    }
-                    .disabled(viewModel.config.nrBands.isEmpty || viewModel.isLoading)
-                }
-
-                Section("LTE Bands") {
-                    bandGrid(bands: BandConfig.commonLTEBands, selected: viewModel.config.lteBands, technology: .lte) {
-                        viewModel.toggleLTEBand($0)
-                    }
-
-                    Button {
-                        Task { await viewModel.applyLTELock() }
-                    } label: {
-                        Label("Apply LTE Lock", systemImage: "lock.fill")
-                    }
-                    .disabled(viewModel.config.lteBands.isEmpty || viewModel.isLoading)
+                    Text(msg)
+                        .font(.subheadline)
+                        .foregroundStyle(viewModel.messageIsError ? .red : .green)
                 }
             }
-            .navigationTitle("Band Lock")
-            .overlay {
-                if viewModel.isLoading {
-                    ProgressView()
-                        .padding()
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+
+            Section {
+                Button(role: .destructive) {
+                    Task { await viewModel.unlockAll() }
+                } label: {
+                    Label("Unlock All Bands", systemImage: "lock.open")
                 }
+                .disabled(viewModel.isLoading)
+            }
+
+            Section("5G NR Bands") {
+                bandGrid(bands: BandConfig.commonNRBands, selected: viewModel.config.nrBands, technology: .nr) {
+                    viewModel.toggleNRBand($0)
+                }
+
+                Button {
+                    Task { await viewModel.applyNRLock() }
+                } label: {
+                    Label("Apply NR Lock", systemImage: "lock.fill")
+                }
+                .disabled(viewModel.config.nrBands.isEmpty || viewModel.isLoading)
+            }
+
+            Section("LTE Bands") {
+                bandGrid(bands: BandConfig.commonLTEBands, selected: viewModel.config.lteBands, technology: .lte) {
+                    viewModel.toggleLTEBand($0)
+                }
+
+                Button {
+                    Task { await viewModel.applyLTELock() }
+                } label: {
+                    Label("Apply LTE Lock", systemImage: "lock.fill")
+                }
+                .disabled(viewModel.config.lteBands.isEmpty || viewModel.isLoading)
+            }
+        }
+        .navigationTitle("Band Lock")
+        .overlay {
+            if viewModel.isLoading {
+                ProgressView()
+                    .padding()
+                    .background(Color(.systemBackground).opacity(0.85), in: RoundedRectangle(cornerRadius: 8))
             }
         }
     }

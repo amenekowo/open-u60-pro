@@ -18,9 +18,14 @@ final class DashboardViewModel {
     var wifiStatus: WifiStatus = .empty
     var systemInfo: SystemInfo = .empty
     var connectedDevices: [ConnectedDevice] = []
+    var isAirplaneMode: Bool = false
+    var isMobileDataOff: Bool = false
     var isLoading: Bool = false
     var lastUpdated: Date?
     var error: String?
+    var simPinRequired: Bool = false
+    var simPukRequired: Bool = false
+    var companionUnavailable: Bool = false
 
     private let client: UbusClient
     private let authManager: AuthManager
@@ -33,8 +38,12 @@ final class DashboardViewModel {
     private var battCurrentFileReadCooldown: Int = 0
     private var companionBwFailCount: Int = 0
     private var companionBwCooldown: Int = 0
+    private var simInfoFailCount: Int = 0
+    private var simInfoCooldown: Int = 0
     private var cachedCpuCores: Int = 4 // SDX75 default
     private static let maxCpuFileReadFails = 3
+    private var companionConsecutiveFailures: Int = 0
+    private static let companionUnavailableThreshold = 5
 
     private static func isCancellation(_ error: Error) -> Bool {
         if error is CancellationError { return true }
@@ -81,6 +90,9 @@ final class DashboardViewModel {
             battCurrentFileReadCooldown = 0
             companionBwFailCount = 0
             companionBwCooldown = 0
+            companionConsecutiveFailures = 0
+            simInfoFailCount = 0
+            simInfoCooldown = 0
             signalResult = await fetchSignal(token: token)
         }
 
@@ -97,17 +109,33 @@ final class DashboardViewModel {
         async let cpuResult = fetchSystemInfo(token: t)
         async let cpuUsage = fetchCpuUsage(token: t)
         async let battCurrentResult = fetchBatteryCurrent(token: t)
+        async let simResult = fetchSimStatus(token: t)
+        async let modemResult = fetchModemStatus(token: t)
+        async let mobileDataResult = fetchMobileDataStatus(token: t)
 
-        let (bat, charger, therm, traffic, devices, wan, wan6, wifi, cpu, cpuUse, battCurrent) = await (
+        let (bat, charger, therm, traffic, devices, wan, wan6, wifi, cpu, cpuUse, battCurrent, sim, modemStatus, mobileDataOff) = await (
             batteryResult, chargerResult, thermalResult, trafficResult,
             deviceList, wanResult, wan6Result, wifiResult, cpuResult, cpuUsage,
-            battCurrentResult
+            battCurrentResult, simResult, modemResult, mobileDataResult
         )
 
         if let (nr, lte, _, op) = signalResult {
             if nr != nrSignal { nrSignal = nr }
             if lte != lteSignal { lteSignal = lte }
             if op != operatorInfo { operatorInfo = op }
+        }
+        if let opMode = modemStatus {
+            let airplane = !opMode.isEmpty && opMode != "ONLINE"
+            if airplane != isAirplaneMode {
+                withAnimation(.easeInOut) {
+                    isAirplaneMode = airplane
+                }
+                if airplane {
+                    nrSignal = .empty
+                    lteSignal = .empty
+                    operatorInfo = .empty
+                }
+            }
         }
         if var b = bat {
             if let chargerData = charger {
@@ -127,8 +155,10 @@ final class DashboardViewModel {
             if traffic != trafficStats { trafficStats = traffic }
         }
         if let devices, devices != connectedDevices { connectedDevices = devices }
-        if let w = wan, w != wanIPv4 { wanIPv4 = w }
-        if let w6 = wan6, w6 != wanIPv6 { wanIPv6 = w6 }
+        let newIPv4 = wan ?? ""
+        let newIPv6 = wan6 ?? ""
+        if newIPv4 != wanIPv4 { wanIPv4 = newIPv4 }
+        if newIPv6 != wanIPv6 { wanIPv6 = newIPv6 }
         if let wifi, wifi != wifiStatus { wifiStatus = wifi }
         if var cpu {
             if let usage = cpuUse {
@@ -137,6 +167,28 @@ final class DashboardViewModel {
             }
             cpu.cpuCores = cachedCpuCores
             if cpu != systemInfo { systemInfo = cpu }
+        }
+        if let (pin, puk) = sim {
+            if pin != simPinRequired { withAnimation(.easeInOut) { simPinRequired = pin } }
+            if puk != simPukRequired { withAnimation(.easeInOut) { simPukRequired = puk } }
+        }
+        if let dataOff = mobileDataOff, dataOff != isMobileDataOff {
+            withAnimation(.easeInOut) { isMobileDataOff = dataOff }
+        }
+
+        // Track companion plugin health: if cpu_usage returned data, plugin is alive
+        if cpuUse != nil {
+            companionConsecutiveFailures = 0
+            if companionUnavailable {
+                withAnimation(.easeInOut) { companionUnavailable = false }
+            }
+        } else if cpuFileReadCooldown > 0 || cpuFileReadFailCount >= Self.maxCpuFileReadFails {
+            // Only count as companion failure when cooldown is active (sustained failure, not first-sample nil)
+            companionConsecutiveFailures += 1
+            if companionConsecutiveFailures >= Self.companionUnavailableThreshold && !companionUnavailable {
+                withAnimation(.easeInOut) { companionUnavailable = true }
+                logger.warning("companion plugin appears unavailable after \(self.companionConsecutiveFailures) consecutive failures")
+            }
         }
 
         lastUpdated = Date()
@@ -149,9 +201,22 @@ final class DashboardViewModel {
                 sessionToken: token, object: "zte_nwinfo_api",
                 method: "nwinfo_get_netinfo", params: [:]
             )
-            return SignalParser.parseNetInfo(data)
+            let parsed = SignalParser.parseNetInfo(data)
+            return (parsed.0, parsed.1, parsed.2, parsed.3)
         } catch {
             self.error = error.localizedDescription
+            return nil
+        }
+    }
+
+    private func fetchModemStatus(token: String) async -> String? {
+        do {
+            let (_, data) = try await client.call(
+                sessionToken: token, object: "zte-companion",
+                method: "modem_status", params: [:]
+            )
+            return data["operate_mode"] as? String ?? ""
+        } catch {
             return nil
         }
     }
@@ -192,7 +257,7 @@ final class DashboardViewModel {
         // Priority 2: zwrt_data get_wwandst (modem pre-computed rates)
         if let (_, data) = try? await client.call(
             sessionToken: token, object: "zwrt_data",
-            method: "get_wwandst", params: [:]
+            method: "get_wwandst", params: ["cid": 1, "type": 1]
         ), let stats = DeviceParser.parseWwandstTraffic(data) {
             return stats
         }
@@ -278,13 +343,21 @@ final class DashboardViewModel {
     }
 
     private func fetchWifi(token: String) async -> WifiStatus? {
+        // Try companion wifi_status first (single call replaces 7 calls)
+        if let (_, data) = try? await client.call(
+            sessionToken: token, object: "zte-companion",
+            method: "wifi_status", params: [:]
+        ), data["error"] == nil, data["htmode_2g"] != nil {
+            return parseCompanionWifi(data)
+        }
+
+        // Fallback to zwrt_wlan multi-call approach
         guard let (_, statusData) = try? await client.call(
             sessionToken: token, object: "zwrt_wlan",
             method: "report", params: [:]
         ) else { return nil }
         var wifi = DeviceParser.parseWifiStatus(statusData)
 
-        // Fire 6 independent calls in parallel (same pattern as refresh())
         async let chanCall = client.call(
             sessionToken: token, object: "zwrt_wlan",
             method: "get_current_channel", params: [:]
@@ -325,6 +398,42 @@ final class DashboardViewModel {
         if let (_, d) = assoc { DeviceParser.parseWifiClients(d, into: &wifi) }
 
         return wifi
+    }
+
+    private func parseCompanionWifi(_ data: [String: Any]) -> WifiStatus {
+        let actualCh2g = data["actual_channel_2g"] as? String ?? ""
+        let actualCh5g = data["actual_channel_5g"] as? String ?? ""
+        let ch2g = !actualCh2g.isEmpty ? actualCh2g : (data["channel_2g"] as? String ?? "")
+        let ch5g = !actualCh5g.isEmpty ? actualCh5g : (data["channel_5g"] as? String ?? "")
+        let enc2g = data["encryption_2g"] as? String ?? ""
+        let enc5g = data["encryption_5g"] as? String ?? ""
+        let clientsTotal: Int
+        if let n = data["clients_total"] as? Int {
+            clientsTotal = n
+        } else if let s = data["clients_total"] as? String, let n = Int(s) {
+            clientsTotal = n
+        } else {
+            clientsTotal = 0
+        }
+        return WifiStatus(
+            wifiOn: (data["wifi_onoff"] as? String) == "1",
+            ssid2g: data["ssid_2g"] as? String ?? "",
+            ssid5g: data["ssid_5g"] as? String ?? "",
+            channel2g: ch2g,
+            channel5g: ch5g,
+            radio2gDisabled: (data["radio2_disabled"] as? String) == "1",
+            radio5gDisabled: (data["radio5_disabled"] as? String) == "1",
+            encryption2g: DeviceParser.formatEncryption(enc2g),
+            encryption5g: DeviceParser.formatEncryption(enc5g),
+            hidden2g: (data["hidden_2g"] as? String) == "1",
+            hidden5g: (data["hidden_5g"] as? String) == "1",
+            txPower2g: data["txpower_2g"] as? String ?? "",
+            txPower5g: data["txpower_5g"] as? String ?? "",
+            bandwidth2g: data["htmode_2g"] as? String ?? "",
+            bandwidth5g: data["htmode_5g"] as? String ?? "",
+            clientsTotal: clientsTotal,
+            wifi6: (data["wifi6_switch"] as? String) == "1"
+        )
     }
 
     private func fetchSystemInfo(token: String) async -> SystemInfo? {
@@ -414,6 +523,40 @@ final class DashboardViewModel {
             if Self.isCancellation(error) { return nil }
             cpuFileReadFailCount += 1
             logger.warning("cpu_usage unexpected error: \(String(describing: error))")
+            return nil
+        }
+    }
+
+    private func fetchMobileDataStatus(token: String) async -> Bool? {
+        guard let (_, data) = try? await client.call(
+            sessionToken: token, object: "zwrt_data",
+            method: "get_wwaniface", params: ["cid": 1]
+        ) else { return nil }
+        let wwan = MobileNetworkParser.parseWWAN(data)
+        let connected = wwan.connectStatus.contains("connected")
+        return wwan.dataEnabled == 0 && !connected
+    }
+
+    private func fetchSimStatus(token: String) async -> (pin: Bool, puk: Bool)? {
+        if simInfoCooldown > 0 { simInfoCooldown -= 1; return nil }
+        do {
+            let (_, data) = try await client.call(
+                sessionToken: token, object: "zwrt_zte_mdm.api",
+                method: "get_sim_info", params: [:]
+            )
+            simInfoFailCount = 0
+            let sim = (data["sim_states"] as? String ?? "").lowercased()
+            let modem = (data["modem_main_state"] as? String ?? "").lowercased()
+            return (
+                sim == "wait pin" || modem == "modem_waitpin",
+                sim == "wait puk" || modem == "modem_waitpuk"
+            )
+        } catch {
+            if Self.isCancellation(error) { return nil }
+            simInfoFailCount += 1
+            if simInfoFailCount >= Self.maxCpuFileReadFails {
+                simInfoCooldown = 15
+            }
             return nil
         }
     }

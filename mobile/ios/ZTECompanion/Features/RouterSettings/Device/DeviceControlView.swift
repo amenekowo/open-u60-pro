@@ -14,23 +14,42 @@ struct DeviceControlView: View {
             }
 
             Section {
-                Toggle("Power Supply", isOn: $viewModel.powerSupplyEnabled)
-                    .disabled(viewModel.isLoading)
-                    .onChange(of: viewModel.powerSupplyEnabled) { _, newValue in
-                        Task { await viewModel.setPowerSupply(enabled: newValue) }
+                Toggle("Power Supply", isOn: Binding(
+                    get: { viewModel.powerSupplyEnabled },
+                    set: { val in
+                        viewModel.powerSupplyEnabled = val
+                        Task { await viewModel.setPowerSupply(enabled: val) }
                     }
+                ))
+                    .disabled(viewModel.isLoading)
             } footer: {
                 Text("When enabled, the device runs directly from the AC adapter and maintains battery at 40–60% to extend battery lifespan.")
             }
 
             Section {
-                Toggle("Power-save Mode", isOn: $viewModel.powerSaveEnabled)
-                    .disabled(viewModel.isLoading)
-                    .onChange(of: viewModel.powerSaveEnabled) { _, newValue in
-                        Task { await viewModel.setPowerSave(enabled: newValue) }
+                Toggle("Power-save Mode", isOn: Binding(
+                    get: { viewModel.powerSaveEnabled },
+                    set: { val in
+                        viewModel.powerSaveEnabled = val
+                        Task { await viewModel.setPowerSave(enabled: val) }
                     }
+                ))
+                    .disabled(viewModel.isLoading)
             } footer: {
                 Text("Restricts data communication speed to reduce consumption and extend battery life.")
+            }
+
+            Section {
+                Toggle("Fast Boot", isOn: Binding(
+                    get: { viewModel.fastBootEnabled },
+                    set: { val in
+                        viewModel.fastBootEnabled = val
+                        Task { await viewModel.setFastBoot(enabled: val) }
+                    }
+                ))
+                    .disabled(viewModel.isLoading)
+            } footer: {
+                Text("When enabled, powering off suspends to RAM for near-instant boot. Disabling uses full shutdown (saves battery when off).")
             }
 
             Section {
@@ -57,7 +76,7 @@ struct DeviceControlView: View {
             if viewModel.isLoading {
                 ProgressView()
                     .padding()
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                    .background(Color(.systemBackground).opacity(0.85), in: RoundedRectangle(cornerRadius: 8))
             }
         }
         .sheet(isPresented: $viewModel.showRebootConfirm) {

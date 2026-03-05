@@ -71,7 +71,6 @@ struct DeviceIdentity: Equatable {
     var mcc: String = ""
     var mnc: String = ""
     var simStatus: String = ""
-    var wanAPN: String = ""
 
     static let empty = DeviceIdentity()
 }
@@ -90,6 +89,8 @@ struct WifiStatus: Equatable {
     var hidden5g: Bool = false
     var txPower2g: String = ""
     var txPower5g: String = ""
+    var bandwidth2g: String = ""
+    var bandwidth5g: String = ""
     var clientsTotal: Int = 0
     var wifi6: Bool = false
 
@@ -311,12 +312,6 @@ enum DeviceParser {
         )
     }
 
-    // MARK: - APN Parser
-
-    static func parseAPN(_ data: [String: Any]) -> String {
-        data["wan_apn"] as? String ?? ""
-    }
-
     // MARK: - WiFi Parser
 
     static func parseWifiStatus(_ data: [String: Any]) -> WifiStatus {
@@ -352,10 +347,15 @@ enum DeviceParser {
 
     static func parseWifiTxPower(_ data: [String: Any], band: String, into status: inout WifiStatus) {
         let percent = data["txpowerpercent"] as? String ?? ""
+        let htmode = data["htmode"] as? String ?? ""
+        let options = band == "2g" ? WiFiConfig.bandwidthOptions2g : WiFiConfig.bandwidthOptions5g
+        let normalizedBw = options.contains(htmode) ? htmode : (htmode.isEmpty ? "" : "auto")
         if band == "2g" {
             status.txPower2g = percent
+            status.bandwidth2g = normalizedBw
         } else if band == "5g" {
             status.txPower5g = percent
+            status.bandwidth5g = normalizedBw
         }
     }
 
@@ -367,7 +367,7 @@ enum DeviceParser {
         status.wifi6 = (data["wifi6_switch"] as? String) == "1"
     }
 
-    private static func formatEncryption(_ raw: String) -> String {
+    static func formatEncryption(_ raw: String) -> String {
         switch raw.lowercased() {
         case "psk2": return "WPA2"
         case "psk2+ccmp": return "WPA2"

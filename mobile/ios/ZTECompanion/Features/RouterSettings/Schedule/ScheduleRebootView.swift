@@ -65,7 +65,7 @@ struct ScheduleRebootView: View {
             if viewModel.isLoading {
                 ProgressView()
                     .padding()
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                    .background(Color(.systemBackground).opacity(0.85), in: RoundedRectangle(cornerRadius: 8))
             }
         }
         .task { await viewModel.refresh() }

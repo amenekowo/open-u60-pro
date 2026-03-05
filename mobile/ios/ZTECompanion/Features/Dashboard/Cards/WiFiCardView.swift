@@ -10,7 +10,7 @@ struct WiFiCardView: View {
                     Text("WiFi")
                         .font(.headline)
                     if wifiStatus.wifiOn && wifiStatus.wifi6 {
-                        Text("WiFi 6")
+                        Text("WiFi 7")
                             .font(.caption2.bold())
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
@@ -39,7 +39,8 @@ struct WiFiCardView: View {
                         hidden: wifiStatus.hidden2g,
                         encryption: wifiStatus.encryption2g,
                         channel: wifiStatus.channel2g,
-                        txPower: wifiStatus.txPower2g
+                        txPower: wifiStatus.txPower2g,
+                        bandwidth: wifiStatus.bandwidth2g
                     )
                     wifiBandRow(
                         label: "5G",
@@ -48,7 +49,8 @@ struct WiFiCardView: View {
                         hidden: wifiStatus.hidden5g,
                         encryption: wifiStatus.encryption5g,
                         channel: wifiStatus.channel5g,
-                        txPower: wifiStatus.txPower5g
+                        txPower: wifiStatus.txPower5g,
+                        bandwidth: wifiStatus.bandwidth5g
                     )
                 }
             }
@@ -57,7 +59,8 @@ struct WiFiCardView: View {
 
     private func wifiBandRow(
         label: String, disabled: Bool, ssid: String, hidden: Bool,
-        encryption: String, channel: String, txPower: String
+        encryption: String, channel: String, txPower: String,
+        bandwidth: String
     ) -> some View {
         HStack {
             Label(label, systemImage: "wifi")
@@ -88,6 +91,11 @@ struct WiFiCardView: View {
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
+                if let bwLabel = formatBandwidth(bandwidth) {
+                    Text(bwLabel)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
                 if !txPower.isEmpty {
                     Text("TX \(txPower)%")
                         .font(.caption2.monospacedDigit())
@@ -95,5 +103,15 @@ struct WiFiCardView: View {
                 }
             }
         }
+    }
+
+    private func formatBandwidth(_ htmode: String) -> String? {
+        let mode = htmode.uppercased()
+        guard !mode.isEmpty, mode != "AUTO" else { return nil }
+        // Extract width from EHT160, HE80, VHT40, HT20, etc.
+        if let range = mode.range(of: "\\d+$", options: .regularExpression) {
+            return mode[range] + "M"
+        }
+        return nil
     }
 }

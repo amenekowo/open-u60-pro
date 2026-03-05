@@ -22,3 +22,10 @@ csv = "1"
 chrono = "0.4"
 indicatif = "0.17"
 regex = "1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSString", "NSSet", "NSError"] }
+objc2-core-wlan = { version = "0.3", features = [
+    "CWWiFiClient", "CWInterface", "CWNetwork", "CWChannel", "CoreWLANTypes",
+] }

@@ -5,90 +5,88 @@ struct ConfigToolView: View {
     @State private var viewModel = ConfigToolViewModel()
 
     var body: some View {
-        NavigationStack {
-            List {
-                Section("Import") {
+        List {
+            Section("Import") {
+                Button {
+                    viewModel.showDocumentPicker = true
+                } label: {
+                    Label("Open Config File", systemImage: "doc.badge.plus")
+                }
+            }
+
+            if let header = viewModel.header {
+                Section("Header") {
+                    LabeledContent("Magic", value: header.magic)
+                    LabeledContent("Encryption", value: header.payloadType.displayName)
+                    LabeledContent("Signature", value: header.signature.isEmpty ? "(none)" : header.signature)
+                    LabeledContent("Payload Offset", value: "\(header.payloadOffset)")
+                }
+
+                Section("Decrypt") {
+                    TextField("Serial Number (optional)", text: $viewModel.serialNumber)
+                        .autocorrectionDisabled()
+
                     Button {
-                        viewModel.showDocumentPicker = true
+                        viewModel.decrypt()
                     } label: {
-                        Label("Open Config File", systemImage: "doc.badge.plus")
+                        Label("Decrypt", systemImage: "lock.open.fill")
                     }
+                    .disabled(viewModel.isProcessing)
+                }
+            }
+
+            if let key = viewModel.usedKey {
+                Section("Result") {
+                    LabeledContent("Key Used", value: key.description)
+                }
+            }
+
+            if let xml = viewModel.decryptedXML {
+                Section("Config XML") {
+                    ScrollView(.horizontal) {
+                        Text(xml.prefix(10000))
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+                    .frame(maxHeight: 400)
                 }
 
-                if let header = viewModel.header {
-                    Section("Header") {
-                        LabeledContent("Magic", value: header.magic)
-                        LabeledContent("Encryption", value: header.payloadType.displayName)
-                        LabeledContent("Signature", value: header.signature.isEmpty ? "(none)" : header.signature)
-                        LabeledContent("Payload Offset", value: "\(header.payloadOffset)")
-                    }
-
-                    Section("Decrypt") {
-                        TextField("Serial Number (optional)", text: $viewModel.serialNumber)
-                            .autocorrectionDisabled()
-
-                        Button {
-                            viewModel.decrypt()
-                        } label: {
-                            Label("Decrypt", systemImage: "lock.open.fill")
-                        }
-                        .disabled(viewModel.isProcessing)
-                    }
-                }
-
-                if let key = viewModel.usedKey {
-                    Section("Result") {
-                        LabeledContent("Key Used", value: key.description)
-                    }
-                }
-
-                if let xml = viewModel.decryptedXML {
-                    Section("Config XML") {
-                        ScrollView(.horizontal) {
-                            Text(xml.prefix(10000))
-                                .font(.system(.caption, design: .monospaced))
-                                .textSelection(.enabled)
-                        }
-                        .frame(maxHeight: 400)
-                    }
-
-                    Section("Export") {
-                        Button {
-                            viewModel.showExporter = true
-                        } label: {
-                            Label("Re-encrypt & Export", systemImage: "square.and.arrow.up")
-                        }
-                    }
-                }
-
-                if let error = viewModel.error {
-                    Section {
-                        Text(error)
-                            .foregroundStyle(.red)
-                            .font(.caption)
-                    }
-                }
-
-                if viewModel.isProcessing {
-                    Section {
-                        HStack {
-                            ProgressView()
-                            Text("Processing...")
-                                .foregroundStyle(.secondary)
-                        }
+                Section("Export") {
+                    Button {
+                        viewModel.showExporter = true
+                    } label: {
+                        Label("Re-encrypt & Export", systemImage: "square.and.arrow.up")
                     }
                 }
             }
-            .navigationTitle("Config Tool")
-            .sheet(isPresented: $viewModel.showDocumentPicker) {
-                DocumentPickerView { data in
-                    viewModel.importFile(data: data)
+
+            if let error = viewModel.error {
+                Section {
+                    Text(error)
+                        .foregroundStyle(.red)
+                        .font(.caption)
                 }
             }
-            .sheet(isPresented: $viewModel.showExporter) {
-                if let data = viewModel.reEncryptAndExport() {
-                    ExportDocumentView(data: data, filename: "config_encrypted.bin")
+
+            if viewModel.isProcessing {
+                Section {
+                    HStack {
+                        ProgressView()
+                        Text("Processing...")
+                            .foregroundStyle(.secondary)
+                    }
                 }
+            }
+        }
+        .navigationTitle("Config Tool")
+        .sheet(isPresented: $viewModel.showDocumentPicker) {
+            DocumentPickerView { data in
+                viewModel.importFile(data: data)
+            }
+        }
+        .sheet(isPresented: $viewModel.showExporter) {
+            if let data = viewModel.reEncryptAndExport() {
+                ExportDocumentView(data: data, filename: "config_encrypted.bin")
             }
         }
     }

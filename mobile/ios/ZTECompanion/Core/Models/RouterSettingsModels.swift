@@ -194,18 +194,21 @@ enum SignalDetectParser {
 struct MobileNetworkConfig: Equatable {
     var connectMode: Int        // 0=manual, 1=auto
     var roamEnable: Int         // 0=off, 1=on
+    var dataEnabled: Int        // 0=off, 1=on
+    var connectStatus: String   // "ipv4_ipv6_connected", "disconnected", etc.
     var netSelectMode: String   // "auto_select" / "manual_select"
-    var currentAPN: String
     var operators: [NetworkOperator]
     var scanStatus: String      // "", "scanning", "done"
 
     var isAutoConnect: Bool { connectMode == 1 }
     var isRoamingEnabled: Bool { roamEnable == 1 }
+    var isDataEnabled: Bool { dataEnabled == 1 }
+    var isConnected: Bool { connectStatus.contains("connected") }
     var isAutoNetSelect: Bool { netSelectMode == "auto_select" }
 
     static let empty = MobileNetworkConfig(
-        connectMode: 1, roamEnable: 0, netSelectMode: "auto_select",
-        currentAPN: "", operators: [], scanStatus: ""
+        connectMode: 1, roamEnable: 0, dataEnabled: 0, connectStatus: "",
+        netSelectMode: "auto_select", operators: [], scanStatus: ""
     )
 }
 
@@ -218,10 +221,12 @@ struct NetworkOperator: Equatable, Identifiable {
 }
 
 enum MobileNetworkParser {
-    static func parseWWAN(_ data: [String: Any]) -> (connectMode: Int, roamEnable: Int) {
+    static func parseWWAN(_ data: [String: Any]) -> (connectMode: Int, roamEnable: Int, dataEnabled: Int, connectStatus: String) {
         let connectMode = asInt(data["connect_mode"]) ?? 1
         let roamEnable = asInt(data["roam_enable"]) ?? 0
-        return (connectMode, roamEnable)
+        let dataEnabled = asInt(data["enable"]) ?? 1
+        let connectStatus = data["connect_status"] as? String ?? ""
+        return (connectMode, roamEnable, dataEnabled, connectStatus)
     }
 
     static func parseNetInfo(_ data: [String: Any]) -> String {
@@ -248,14 +253,6 @@ enum MobileNetworkParser {
         data["m_netselect_result"] as? String ?? ""
     }
 
-    static func parseCurrentAPN(_ modeData: [String: Any], _ listData: [String: Any]) -> String {
-        let profiles = APNParser.parseProfiles(listData)
-        if let active = profiles.first(where: { $0.active }) {
-            return active.name.isEmpty ? active.apn : active.name
-        }
-        return profiles.first?.name ?? ""
-    }
-
     private static func asInt(_ val: Any?) -> Int? {
         if let i = val as? Int { return i }
         if let s = val as? String { return Int(s) }
@@ -269,50 +266,76 @@ enum MobileNetworkParser {
 struct APNConfig: Equatable {
     var mode: String            // "0" = auto, "1" = manual
     var profiles: [APNProfile]
+    var autoProfiles: [APNProfile]
 
     var isManual: Bool { mode == "1" }
 
-    static let empty = APNConfig(mode: "", profiles: [])
+    static let empty = APNConfig(mode: "", profiles: [], autoProfiles: [])
 }
 
 struct APNProfile: Equatable, Identifiable {
-    let id: String
-    var name: String
-    var apn: String
-    var pdpType: String
-    var authMode: String
+    let id: String           // maps to profileId ("manu1", "manu2", ...)
+    var name: String         // maps to profilename
+    var apn: String          // maps to wanapn
+    var pdpType: Int         // 1=IPv4, 2=IPv6, 3=IPv4v6
+    var authMode: Int        // 0=none, 1=PAP, 2=CHAP
     var username: String
     var password: String
-    var active: Bool
+    var active: Bool         // maps to isEnable
 
     static let empty = APNProfile(
-        id: "", name: "", apn: "", pdpType: "IPV4V6",
-        authMode: "none", username: "", password: "", active: false
+        id: "", name: "", apn: "", pdpType: 3,
+        authMode: 0, username: "", password: "", active: false
     )
 
-    static let pdpTypeOptions = ["IPV4", "IPV6", "IPV4V6"]
-    static let authModeOptions = ["none", "pap", "chap", "pap_chap"]
+    static let pdpTypeOptions: [(label: String, value: Int)] = [
+        ("IPv4", 1), ("IPv6", 2), ("IPv4v6", 3)
+    ]
+    static let authModeOptions: [(label: String, value: Int)] = [
+        ("None", 0), ("PAP", 1), ("CHAP", 2)
+    ]
+
+    var pdpTypeLabel: String {
+        Self.pdpTypeOptions.first { $0.value == pdpType }?.label ?? "IPv4v6"
+    }
+    var authModeLabel: String {
+        Self.authModeOptions.first { $0.value == authMode }?.label ?? "None"
+    }
 }
 
 enum APNParser {
     static func parseMode(_ data: [String: Any]) -> String {
-        data["apn_mode"] as? String ?? "0"
+        if let i = data["apn_mode"] as? Int { return "\(i)" }
+        return data["apn_mode"] as? String ?? "0"
     }
 
     static func parseProfiles(_ data: [String: Any]) -> [APNProfile] {
-        guard let list = data["apn_list"] as? [[String: Any]] else { return [] }
-        return list.enumerated().map { index, item in
-            APNProfile(
-                id: item["id"] as? String ?? "\(index)",
-                name: item["name"] as? String ?? "",
-                apn: item["apn"] as? String ?? "",
-                pdpType: item["pdp_type"] as? String ?? "IPV4V6",
-                authMode: item["auth_mode"] as? String ?? "none",
+        guard let list = data["apnListArray"] as? [[String: Any]] else { return [] }
+        return list.compactMap { item in
+            let id = item["profileId"] as? String ?? ""
+            guard !id.isEmpty else { return nil }
+            let name = item["profilename"] as? String ?? ""
+            let apn = item["wanapn"] as? String ?? ""
+            // Filter out empty pre-allocated slots
+            guard !name.isEmpty || !apn.isEmpty else { return nil }
+            return APNProfile(
+                id: id,
+                name: name,
+                apn: apn,
+                pdpType: asInt(item["pdpType"]) ?? 3,
+                authMode: asInt(item["pppAuthMode"]) ?? 0,
                 username: item["username"] as? String ?? "",
                 password: item["password"] as? String ?? "",
-                active: asBool(item["active"])
+                active: asBool(item["isEnable"])
             )
         }
+    }
+
+    private static func asInt(_ val: Any?) -> Int? {
+        if let i = val as? Int { return i }
+        if let s = val as? String { return Int(s) }
+        if let d = val as? Double { return Int(d) }
+        return nil
     }
 
     private static func asBool(_ value: Any?) -> Bool {
@@ -341,41 +364,122 @@ struct WiFiConfig: Equatable {
     var wifiOnOff: Bool
     var hidden2g: Bool
     var hidden5g: Bool
+    var radio2gDisabled: Bool
+    var radio5gDisabled: Bool
+    var wifi7Enabled: Bool
+    var bandwidth2g: String
+    var bandwidth5g: String
 
     static let empty = WiFiConfig(
         ssid2g: "", ssid5g: "", key2g: "", key5g: "",
         channel2g: "auto", channel5g: "auto",
         txpower2g: "100", txpower5g: "100",
         encryption2g: "psk2+ccmp", encryption5g: "psk2+ccmp",
-        wifiOnOff: true, hidden2g: false, hidden5g: false
+        wifiOnOff: true, hidden2g: false, hidden5g: false,
+        radio2gDisabled: false, radio5gDisabled: false,
+        wifi7Enabled: false, bandwidth2g: "auto", bandwidth5g: "auto"
     )
 
     static let channelOptions2g = ["auto", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"]
     static let channelOptions5g = ["auto", "36", "40", "44", "48", "52", "56", "60", "64", "100", "104", "108", "112", "116", "120", "124", "128", "132", "136", "140", "149", "153", "157", "161", "165"]
-    static let txpowerOptions = ["25", "50", "75", "100"]
-    static let encryptionOptions = ["none", "psk+tkip", "psk+ccmp", "psk2+ccmp", "psk-mixed+ccmp"]
+    static let txpowerOptions = ["10", "20", "30", "40", "50", "60", "70", "80", "90", "100"]
+    static let encryptionOptions = ["none", "psk+tkip", "psk+ccmp", "psk2+ccmp", "psk-mixed+ccmp", "sae", "sae-mixed"]
+    static let bandwidthOptions2g = ["auto", "EHT20", "EHT40"]
+    static let bandwidthOptions5g = ["auto", "EHT20", "EHT40", "EHT80", "EHT160"]
+
+    /// Returns 5GHz channels compatible with the given bandwidth
+    static func channels5g(for bandwidth: String) -> [String] {
+        switch bandwidth {
+        case "EHT160":
+            // UNII-1+2 (36-64) and UNII-2C (100-128) only
+            return ["auto", "36", "40", "44", "48", "52", "56", "60", "64",
+                    "100", "104", "108", "112", "116", "120", "124", "128"]
+        case "EHT80":
+            // Exclude 132-140 (no full 80MHz block without ch144) and 165
+            return ["auto", "36", "40", "44", "48", "52", "56", "60", "64",
+                    "100", "104", "108", "112", "116", "120", "124", "128",
+                    "149", "153", "157", "161"]
+        case "EHT40":
+            // Exclude 165 (no 40MHz pair)
+            return ["auto", "36", "40", "44", "48", "52", "56", "60", "64",
+                    "100", "104", "108", "112", "116", "120", "124", "128",
+                    "132", "136", "140", "149", "153", "157", "161"]
+        default: // auto, EHT20
+            return channelOptions5g
+        }
+    }
+
+    /// Returns 5GHz bandwidths compatible with the given channel
+    static func bandwidths5g(for channel: String) -> [String] {
+        guard channel != "auto" else { return bandwidthOptions5g }
+        guard let ch = Int(channel) else { return bandwidthOptions5g }
+        if ch == 165 {
+            return ["auto", "EHT20"]
+        } else if ch >= 149 {
+            return ["auto", "EHT20", "EHT40", "EHT80"]
+        } else if ch >= 132 {
+            return ["auto", "EHT20", "EHT40"]
+        } else {
+            return bandwidthOptions5g
+        }
+    }
+
+    /// Returns max bandwidth available for a given 5GHz channel
+    static func maxBandwidth5g(for channel: String) -> String {
+        guard channel != "auto" else { return "EHT160" }
+        guard let ch = Int(channel) else { return "EHT160" }
+        if ch == 165 { return "EHT20" }
+        if ch >= 149 { return "EHT80" }
+        if ch >= 132 { return "EHT40" }
+        return "EHT160"
+    }
 }
 
 enum WiFiParser {
     static func parse(_ data: [String: Any]) -> WiFiConfig {
-        WiFiConfig(
+        let isCompanion = data["htmode_2g"] != nil
+        return WiFiConfig(
             ssid2g: data["ssid_2g"] as? String ?? "",
             ssid5g: data["ssid_5g"] as? String ?? "",
             key2g: data["key_2g"] as? String ?? "",
             key5g: data["key_5g"] as? String ?? "",
-            channel2g: data["channel_2g"] as? String ?? "auto",
-            channel5g: data["channel_5g"] as? String ?? "auto",
+            channel2g: normalizeChannel(data["channel_2g"] as? String),
+            channel5g: normalizeChannel(data["channel_5g"] as? String),
             txpower2g: data["txpower_2g"] as? String ?? "100",
             txpower5g: data["txpower_5g"] as? String ?? "100",
             encryption2g: data["encryption_2g"] as? String ?? "psk2+ccmp",
             encryption5g: data["encryption_5g"] as? String ?? "psk2+ccmp",
             wifiOnOff: asBool(data["wifi_onoff"]),
             hidden2g: asBool(data["hidden_2g"]),
-            hidden5g: asBool(data["hidden_5g"])
+            hidden5g: asBool(data["hidden_5g"]),
+            radio2gDisabled: asBool(data["radio2_disabled"]),
+            radio5gDisabled: asBool(data["radio5_disabled"]),
+            wifi7Enabled: isCompanion ? asBool(data["wifi6_switch"]) : false,
+            bandwidth2g: isCompanion ? normalizeBandwidth(data["htmode_2g"] as? String, is5g: false) : "auto",
+            bandwidth5g: isCompanion ? normalizeBandwidth(data["htmode_5g"] as? String, is5g: true) : "auto"
         )
     }
 
-    private static func asBool(_ value: Any?) -> Bool {
+    static func parseWifi7(_ data: [String: Any]) -> Bool {
+        asBool(data["wifi6_switch"])
+    }
+
+    static func parseBandwidth(_ data: [String: Any]) -> String {
+        normalizeBandwidth(data["htmode"] as? String)
+    }
+
+    private static func normalizeBandwidth(_ raw: String?, is5g: Bool = true) -> String {
+        guard let raw, !raw.isEmpty else { return "auto" }
+        let options = is5g ? WiFiConfig.bandwidthOptions5g : WiFiConfig.bandwidthOptions2g
+        return options.contains(raw) ? raw : "auto"
+    }
+
+    private static func normalizeChannel(_ raw: String?) -> String {
+        guard let raw, !raw.isEmpty, raw != "0" else { return "auto" }
+        return raw
+    }
+
+    static func asBool(_ value: Any?) -> Bool {
         if let str = value as? String {
             return str == "1" || str.lowercased() == "true" || str.lowercased() == "on"
         }

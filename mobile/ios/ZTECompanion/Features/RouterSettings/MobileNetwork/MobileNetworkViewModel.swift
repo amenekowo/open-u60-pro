@@ -85,19 +85,48 @@ final class MobileNetworkViewModel {
         isLoading = true
         let token = authManager.sessionToken
         do {
+            var params: [String: Any] = [
+                "cid": 1,
+                "connect_mode": enabled ? 1 : config.connectMode,
+                "roam_enable": config.roamEnable,
+                "enable": enabled ? 1 : 0
+            ]
+            // Must pass connect_status: "disconnected" to actually tear down the PDN session.
+            // Without it, the firmware sets enable=0 but keeps the bearer alive.
+            if !enabled {
+                params["connect_status"] = "disconnected"
+            }
             let (_, _) = try await client.call(
                 sessionToken: token,
                 object: "zwrt_data",
                 method: "set_wwaniface",
-                params: [
-                    "cid": 1,
-                    "connect_mode": config.connectMode,
-                    "roam_enable": config.roamEnable,
-                    "enable": enabled ? 1 : 0
-                ]
+                params: params
             )
             config.dataEnabled = enabled ? 1 : 0
-            showMessage(enabled ? "Mobile data enabled" : "Mobile data disabled", isError: false)
+
+            // Poll to confirm the state actually changed
+            for _ in 0..<3 {
+                try? await Task.sleep(for: .seconds(2))
+                let (_, wwanData) = try await client.call(
+                    sessionToken: token,
+                    object: "zwrt_data",
+                    method: "get_wwaniface",
+                    params: ["cid": 1]
+                )
+                let wwan = MobileNetworkParser.parseWWAN(wwanData)
+                config.connectStatus = wwan.connectStatus
+                let connected = wwan.connectStatus.contains("connected")
+                if enabled == connected {
+                    showMessage(enabled ? "Mobile data enabled" : "Mobile data disabled", isError: false)
+                    isLoading = false
+                    return
+                }
+            }
+            if enabled {
+                showMessage("Mobile data enabled (connection still establishing)", isError: false)
+            } else {
+                showMessage("Mobile data disabled (connection may still be tearing down)", isError: false)
+            }
         } catch {
             selectedDataEnabled = !enabled
             showMessage("Failed: \(error.localizedDescription)", isError: true)

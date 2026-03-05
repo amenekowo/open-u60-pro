@@ -113,38 +113,60 @@ pub fn run(cmd: Cmd) -> Result<()> {
             confirm_guard(confirm, "enable mobile data")?;
             let t = get_transport(&transport)?;
             let current = t.ubus_call("zwrt_data", "get_wwaniface", Some(&json!({"cid": 1})));
-            let connect_mode = current.get("connect_mode").and_then(|v| v.as_i64()).unwrap_or(0);
-            let roam_enable = current.get("roam_enable").and_then(|v| v.as_i64()).unwrap_or(0);
+            let roam_enable = current.get("roam_enable").and_then(|v| v.as_i64()).unwrap_or(1);
+            // Always restore connect_mode to 1 (auto) so the modem reconnects
             t.ubus_call(
                 "zwrt_data",
                 "set_wwaniface",
                 Some(&json!({
                     "cid": 1,
-                    "connect_mode": connect_mode,
+                    "connect_mode": 1,
                     "roam_enable": roam_enable,
                     "enable": 1
                 })),
             );
-            println!("{}", "Mobile data enabled.".green());
+            // Poll to confirm connection comes up
+            for _ in 0..3 {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                let status = t.ubus_call("zwrt_data", "get_wwaniface", Some(&json!({"cid": 1})));
+                let cs = status.get("connect_status").and_then(|v| v.as_str()).unwrap_or("");
+                if cs.contains("connected") {
+                    println!("{}", "Mobile data enabled.".green());
+                    return Ok(());
+                }
+            }
+            println!("{}", "Mobile data enabled (connection still establishing).".yellow());
             Ok(())
         }
         Cmd::DataOff { transport, confirm } => {
             confirm_guard(confirm, "disable mobile data")?;
             let t = get_transport(&transport)?;
             let current = t.ubus_call("zwrt_data", "get_wwaniface", Some(&json!({"cid": 1})));
-            let connect_mode = current.get("connect_mode").and_then(|v| v.as_i64()).unwrap_or(0);
-            let roam_enable = current.get("roam_enable").and_then(|v| v.as_i64()).unwrap_or(0);
+            let roam_enable = current.get("roam_enable").and_then(|v| v.as_i64()).unwrap_or(1);
+            // Must pass connect_status: "disconnected" to actually tear down the PDN session.
+            // Without it, the firmware sets enable=0 but keeps the bearer alive.
             t.ubus_call(
                 "zwrt_data",
                 "set_wwaniface",
                 Some(&json!({
                     "cid": 1,
-                    "connect_mode": connect_mode,
+                    "connect_mode": 1,
                     "roam_enable": roam_enable,
-                    "enable": 0
+                    "enable": 0,
+                    "connect_status": "disconnected"
                 })),
             );
-            println!("{}", "Mobile data disabled.".green());
+            // Poll to confirm disconnection
+            for _ in 0..3 {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                let status = t.ubus_call("zwrt_data", "get_wwaniface", Some(&json!({"cid": 1})));
+                let cs = status.get("connect_status").and_then(|v| v.as_str()).unwrap_or("");
+                if !cs.contains("connected") {
+                    println!("{}", "Mobile data disabled.".green());
+                    return Ok(());
+                }
+            }
+            println!("{}", "Mobile data disabled (connection may still be tearing down).".yellow());
             Ok(())
         }
     }

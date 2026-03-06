@@ -8,7 +8,7 @@ struct BatteryStatus: Equatable {
     var timeToFull: Int = -1      // minutes, -1 = unknown
     var timeToEmpty: Int = -1     // minutes, -1 = unknown
     var currentMA: Int?            // milliamps; negative = discharging, positive = charging
-    var voltageMV: Int?            // millivolts from ubus
+    var voltageMV: Int?            // millivolts from agent
 
     static let empty = BatteryStatus()
 }
@@ -27,6 +27,9 @@ struct TrafficStats: Equatable {
     /// Pre-computed rates from the router (bytes/sec), if available
     var precomputedRxRate: Double?
     var precomputedTxRate: Double?
+    /// Server-computed speeds from zte-agent (bytes/sec), highest priority
+    var serverRxSpeed: Double?
+    var serverTxSpeed: Double?
 
     static let empty = TrafficStats()
 
@@ -34,6 +37,8 @@ struct TrafficStats: Equatable {
         lhs.rxBytes == rhs.rxBytes && lhs.txBytes == rhs.txBytes
             && lhs.precomputedRxRate == rhs.precomputedRxRate
             && lhs.precomputedTxRate == rhs.precomputedTxRate
+            && lhs.serverRxSpeed == rhs.serverRxSpeed
+            && lhs.serverTxSpeed == rhs.serverTxSpeed
     }
 }
 
@@ -93,6 +98,8 @@ struct WifiStatus: Equatable {
     var bandwidth5g: String = ""
     var clientsTotal: Int = 0
     var wifi6: Bool = false
+    var guestEnabled: Bool = false
+    var guestSsid: String = ""
 
     static let empty = WifiStatus()
 }
@@ -181,7 +188,16 @@ enum DeviceParser {
     }
 
     static func computeSpeed(previous: TrafficStats, current: TrafficStats) -> TrafficSpeed {
-        // Use pre-computed rates if available
+        // Priority 1: server-computed speeds from zte-agent (precise Instant timing)
+        if let rxSpeed = current.serverRxSpeed,
+           let txSpeed = current.serverTxSpeed {
+            return TrafficSpeed(
+                downloadBytesPerSec: rxSpeed,
+                uploadBytesPerSec: txSpeed
+            )
+        }
+
+        // Priority 2: pre-computed rates from ZTE daemon
         if let rxRate = current.precomputedRxRate,
            let txRate = current.precomputedTxRate {
             return TrafficSpeed(
@@ -190,6 +206,7 @@ enum DeviceParser {
             )
         }
 
+        // Priority 3: client-side delta
         // Skip delta computation when source changes to avoid invalid spikes
         if !previous.source.isEmpty && !current.source.isEmpty && previous.source != current.source {
             return .zero

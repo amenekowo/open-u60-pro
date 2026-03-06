@@ -149,7 +149,7 @@ struct SignalSnapshot: Identifiable, Equatable {
     }
 }
 
-/// Parser that extracts signal data from the ubus nwinfo_get_netinfo response.
+/// Parser that extracts signal data from the agent nwinfo_get_netinfo response.
 enum SignalParser {
     static func parseNetInfo(_ data: [String: Any]) -> (NRSignal, LTESignal, WCDMASignal, OperatorInfo) {
         var nr = NRSignal()

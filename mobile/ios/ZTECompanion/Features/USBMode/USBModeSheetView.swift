@@ -32,6 +32,7 @@ struct USBModeSheetView: View {
                         Text(msg)
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(viewModel.messageIsError ? .red : .green)
+                            .textSelection(.enabled)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 32)
                     }

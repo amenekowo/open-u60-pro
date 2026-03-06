@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ToolsListView: View {
-    let client: UbusClient
+    let client: AgentClient
     let authManager: AuthManager
 
     var body: some View {

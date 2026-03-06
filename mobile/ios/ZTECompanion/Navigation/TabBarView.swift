@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct TabBarView: View {
-    let client: UbusClient
+    let client: AgentClient
     let authManager: AuthManager
     @AppStorage("poll_interval") private var pollInterval: Double = 2.0
 
@@ -17,7 +17,7 @@ struct TabBarView: View {
         let active: Bool
     }
 
-    init(client: UbusClient, authManager: AuthManager) {
+    init(client: AgentClient, authManager: AuthManager) {
         self.client = client
         self.authManager = authManager
         _dashboardVM = State(initialValue: DashboardViewModel(client: client, authManager: authManager))

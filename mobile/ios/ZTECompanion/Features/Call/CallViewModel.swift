@@ -21,13 +21,13 @@ final class CallViewModel {
     var error: String?
     var showKeypad: Bool = false
 
-    private let client: UbusClient
+    private let client: AgentClient
     private let authManager: AuthManager
     private var pollTask: Task<Void, Never>?
     private var durationTask: Task<Void, Never>?
     private var callStartTime: Date?
 
-    init(client: UbusClient, authManager: AuthManager) {
+    init(client: AgentClient, authManager: AuthManager) {
         self.client = client
         self.authManager = authManager
     }
@@ -54,9 +54,10 @@ final class CallViewModel {
         error = nil
         callState = .dialing
 
-        let result = await ubusCall(method: "call_dial", params: ["number": number])
-        if let err = result?["error"] as? String {
-            error = err
+        do {
+            let _ = try await client.postJSON("/api/call/dial", body: ["number": number])
+        } catch {
+            self.error = error.localizedDescription
             callState = .idle
         }
         // State will be updated by polling
@@ -65,7 +66,7 @@ final class CallViewModel {
 
     func hangup() async {
         error = nil
-        let _ = await ubusCall(method: "call_hangup")
+        let _ = try? await client.postJSON("/api/call/hangup")
         callState = .idle
         isMuted = false
         stopDurationTimer()
@@ -74,21 +75,25 @@ final class CallViewModel {
 
     func answer() async {
         error = nil
-        let _ = await ubusCall(method: "call_answer")
+        let _ = try? await client.postJSON("/api/call/answer")
         startPolling()
     }
 
     func sendDTMF(_ digits: String) async {
-        let _ = await ubusCall(method: "call_dtmf", params: ["digits": digits])
+        let _ = try? await client.postJSON("/api/call/dtmf", body: ["digits": digits])
     }
 
     func toggleMute() async {
         let newMuted = !isMuted
-        let result = await ubusCall(method: "call_mute", params: ["enabled": newMuted])
-        if let muted = result?["muted"] as? Bool {
-            isMuted = muted
-        } else if result?["error"] == nil {
-            isMuted = newMuted
+        do {
+            let result = try await client.postJSON("/api/call/mute", body: ["enabled": newMuted])
+            if let muted = result["muted"] as? Bool {
+                isMuted = muted
+            } else {
+                isMuted = newMuted
+            }
+        } catch {
+            // keep current state
         }
     }
 
@@ -110,8 +115,8 @@ final class CallViewModel {
     }
 
     private func pollCallStatus() async {
-        let result = await ubusCall(method: "call_status")
-        guard let calls = result?["calls"] as? [[String: Any]] else { return }
+        guard let result = try? await client.getJSON("/api/call/status") else { return }
+        guard let calls = result["calls"] as? [[String: Any]] else { return }
 
         if calls.isEmpty {
             if callState != .idle {
@@ -172,36 +177,5 @@ final class CallViewModel {
         durationTask = nil
         callStartTime = nil
         callDuration = 0
-    }
-
-    // MARK: - Ubus
-
-    private func ubusCall(method: String, params: [String: Any] = [:]) async -> [String: Any]? {
-        var token = authManager.sessionToken
-        do {
-            let (_, data) = try await client.call(
-                sessionToken: token,
-                object: "zte-companion",
-                method: method,
-                params: params
-            )
-            return data
-        } catch {
-            // Retry once on auth failure
-            if await authManager.reauthenticate() {
-                token = authManager.sessionToken
-                if let (_, data) = try? await client.call(
-                    sessionToken: token,
-                    object: "zte-companion",
-                    method: method,
-                    params: params
-                ) {
-                    return data
-                }
-            }
-            logger.error("ubusCall \(method): \(error.localizedDescription)")
-            self.error = error.localizedDescription
-            return nil
-        }
     }
 }

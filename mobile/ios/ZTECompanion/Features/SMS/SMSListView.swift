@@ -2,7 +2,7 @@ import SwiftUI
 
 struct SMSListView: View {
     var viewModel: SMSViewModel
-    let client: UbusClient
+    let client: AgentClient
     let authManager: AuthManager
     @State private var showCompose = false
     @State private var showCall = false

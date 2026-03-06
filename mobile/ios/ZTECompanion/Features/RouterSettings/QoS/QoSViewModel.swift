@@ -8,10 +8,10 @@ final class QoSViewModel {
     var message: String?
     var messageIsError: Bool = false
 
-    private let client: UbusClient
+    private let client: AgentClient
     private let authManager: AuthManager
 
-    init(client: UbusClient, authManager: AuthManager) {
+    init(client: AgentClient, authManager: AuthManager) {
         self.client = client
         self.authManager = authManager
     }
@@ -19,15 +19,9 @@ final class QoSViewModel {
     func refresh() async {
         isLoading = true
         message = nil
-        let token = authManager.sessionToken
 
         do {
-            let (_, data) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_router.api",
-                method: "router_get_qos_switch",
-                params: [:]
-            )
+            let data = try await client.getJSON("/api/router/qos")
             config = QoSParser.parse(data)
         } catch {
             showMessage("Failed to load QoS: \(error.localizedDescription)", isError: true)
@@ -38,15 +32,9 @@ final class QoSViewModel {
 
     func toggle(enabled: Bool) async {
         isLoading = true
-        let token = authManager.sessionToken
 
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_router.api",
-                method: "router_set_qos_switch",
-                params: ["qos_switch": enabled ? "1" : "0"]
-            )
+            let _ = try await client.putJSON("/api/router/qos", body: ["qos_switch": enabled ? "1" : "0"])
             showMessage("QoS \(enabled ? "enabled" : "disabled")", isError: false)
             config = QoSConfig(enabled: enabled)
         } catch {

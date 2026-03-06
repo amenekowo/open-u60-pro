@@ -8,10 +8,10 @@ final class BandLockViewModel {
     var message: String?
     var messageIsError: Bool = false
 
-    private let client: UbusClient
+    private let client: AgentClient
     private let authManager: AuthManager
 
-    init(client: UbusClient, authManager: AuthManager) {
+    init(client: AgentClient, authManager: AuthManager) {
         self.client = client
         self.authManager = authManager
     }
@@ -38,22 +38,13 @@ final class BandLockViewModel {
             return
         }
         isLoading = true
-        let token = authManager.sessionToken
         let bandStr = config.nrBandString
 
         do {
             // Lock NSA bands
-            let (_, _) = try await client.call(
-                sessionToken: token, object: "zte_nwinfo_api",
-                method: "nwinfo_set_nrbandlock",
-                params: ["nr5g_type": "nsa", "nr5g_band": bandStr]
-            )
+            let _ = try await client.postJSON("/api/cell/band/nr", body: ["nr5g_type": "nsa", "nr5g_band": bandStr])
             // Lock SA bands
-            let (_, _) = try await client.call(
-                sessionToken: token, object: "zte_nwinfo_api",
-                method: "nwinfo_set_nrbandlock",
-                params: ["nr5g_type": "sa", "nr5g_band": bandStr]
-            )
+            let _ = try await client.postJSON("/api/cell/band/nr", body: ["nr5g_type": "sa", "nr5g_band": bandStr])
             showMessage("NR bands locked: \(bandStr)", isError: false)
         } catch {
             showMessage("Failed: \(error.localizedDescription)", isError: true)
@@ -67,19 +58,14 @@ final class BandLockViewModel {
             return
         }
         isLoading = true
-        let token = authManager.sessionToken
 
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token, object: "zte_nwinfo_api",
-                method: "nwinfo_set_gwl_bandlock",
-                params: [
-                    "is_lte_band": "1",
-                    "lte_band_mask": config.lteBandString,
-                    "is_gw_band": "0",
-                    "gw_band_mask": ""
-                ]
-            )
+            let _ = try await client.postJSON("/api/cell/band/lte", body: [
+                "is_lte_band": "1",
+                "lte_band_mask": config.lteBandString,
+                "is_gw_band": "0",
+                "gw_band_mask": ""
+            ])
             showMessage("LTE bands locked: \(config.lteBandString)", isError: false)
         } catch {
             showMessage("Failed: \(error.localizedDescription)", isError: true)
@@ -89,13 +75,9 @@ final class BandLockViewModel {
 
     func unlockAll() async {
         isLoading = true
-        let token = authManager.sessionToken
 
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token, object: "zte_nwinfo_api",
-                method: "nwinfo_rest_band_rat", params: [:]
-            )
+            let _ = try await client.postJSON("/api/cell/band/reset")
             config = .empty
             showMessage("All bands unlocked", isError: false)
         } catch {

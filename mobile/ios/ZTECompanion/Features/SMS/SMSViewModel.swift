@@ -13,10 +13,10 @@ final class SMSViewModel {
     var isSending = false
     var error: String?
 
-    private let client: UbusClient
+    private let client: AgentClient
     private let authManager: AuthManager
 
-    init(client: UbusClient, authManager: AuthManager) {
+    init(client: AgentClient, authManager: AuthManager) {
         self.client = client
         self.authManager = authManager
     }
@@ -26,13 +26,11 @@ final class SMSViewModel {
     func refresh() async {
         isLoading = true
         error = nil
-        var token = authManager.sessionToken
 
-        // Fetch messages — retry once on session expired (code 6)
-        var messages = await fetchMessages(token: token)
+        // Fetch messages — retry once on session expired
+        var messages = await fetchMessages()
         if messages == nil, await authManager.reauthenticate() {
-            token = authManager.sessionToken
-            messages = await fetchMessages(token: token)
+            messages = await fetchMessages()
         }
 
         if let messages {
@@ -41,27 +39,22 @@ final class SMSViewModel {
         }
 
         // Fetch capacity in parallel (non-critical)
-        if let cap = await fetchCapacity(token: token) {
+        if let cap = await fetchCapacity() {
             capacity = cap
         }
 
         isLoading = false
     }
 
-    private func fetchMessages(token: String) async -> [SMSMessage]? {
+    private func fetchMessages() async -> [SMSMessage]? {
         do {
-            let (_, data) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_wms",
-                method: "zte_libwms_get_sms_data",
-                params: [
-                    "page": 0,
-                    "data_per_page": 500,
-                    "mem_store": 1,
-                    "tags": 10,
-                    "order_by": "order by id desc"
-                ]
-            )
+            let data = try await client.postJSON("/api/sms/list", body: [
+                "page": 0,
+                "data_per_page": 500,
+                "mem_store": 1,
+                "tags": 10,
+                "order_by": "order by id desc"
+            ])
             return SMSParser.parseMessages(data)
         } catch {
             logger.error("fetchMessages: \(error.localizedDescription)")
@@ -70,14 +63,9 @@ final class SMSViewModel {
         }
     }
 
-    private func fetchCapacity(token: String) async -> SMSCapacity? {
+    private func fetchCapacity() async -> SMSCapacity? {
         do {
-            let (_, data) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_wms",
-                method: "zwrt_wms_get_wms_capacity",
-                params: [:]
-            )
+            let data = try await client.getJSON("/api/sms/capacity")
             return SMSParser.parseCapacity(data)
         } catch {
             logger.warning("fetchCapacity: \(error.localizedDescription)")
@@ -90,26 +78,19 @@ final class SMSViewModel {
     func sendSMS(to number: String, message: String) async -> Bool {
         isSending = true
         error = nil
-        let token = authManager.sessionToken
 
         let encodeType = SMSParser.getEncodeType(message)
-        // Web UI always UCS-2 encodes the body via encodeMessage()
         let body = SMSParser.encodeUCS2Hex(message)
         let smsTime = SMSParser.formatSMSTime()
 
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_wms",
-                method: "zte_libwms_send_sms",
-                params: [
-                    "number": number,
-                    "sms_time": smsTime,
-                    "message_body": body,
-                    "id": "-1",
-                    "encode_type": encodeType
-                ]
-            )
+            let _ = try await client.postJSON("/api/sms/send", body: [
+                "number": number,
+                "sms_time": smsTime,
+                "message_body": body,
+                "id": "-1",
+                "encode_type": encodeType
+            ])
             logger.info("SMS sent to \(number)")
             isSending = false
             await refresh()
@@ -125,16 +106,10 @@ final class SMSViewModel {
     // MARK: - Delete
 
     func deleteMessages(ids: [Int]) async {
-        let token = authManager.sessionToken
         let idStr = ids.map(String.init).joined(separator: ";") + ";"
 
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_wms",
-                method: "zwrt_wms_delete_sms",
-                params: ["id": idStr]
-            )
+            let _ = try await client.postJSON("/api/sms/delete", body: ["id": idStr])
             logger.info("Deleted SMS ids: \(idStr)")
             await refresh()
         } catch {
@@ -152,16 +127,10 @@ final class SMSViewModel {
 
     func markAsRead(ids: [Int]) async {
         guard !ids.isEmpty else { return }
-        let token = authManager.sessionToken
         let idStr = ids.map(String.init).joined(separator: ";") + ";"
 
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_wms",
-                method: "zwrt_wms_modify_tag",
-                params: ["id": idStr, "tag": 0]
-            )
+            let _ = try await client.postJSON("/api/sms/read", body: ["id": idStr, "tag": 0])
             // Update local state without full refresh
             for i in allMessages.indices where ids.contains(allMessages[i].id) {
                 let msg = allMessages[i]

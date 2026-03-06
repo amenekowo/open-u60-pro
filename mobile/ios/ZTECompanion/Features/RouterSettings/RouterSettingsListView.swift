@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct RouterSettingsListView: View {
-    let client: UbusClient
+    let client: AgentClient
     let authManager: AuthManager
 
     var body: some View {
@@ -59,6 +59,12 @@ struct RouterSettingsListView: View {
                     }
 
                     NavigationLink {
+                        GuestWiFiSettingsView(viewModel: GuestWiFiSettingsViewModel(client: client, authManager: authManager))
+                    } label: {
+                        Label("Guest WiFi", systemImage: "wifi.exclamationmark")
+                    }
+
+                    NavigationLink {
                         APNView(viewModel: APNViewModel(client: client, authManager: authManager))
                     } label: {
                         Label("APN", systemImage: "simcard")
@@ -95,6 +101,7 @@ struct RouterSettingsListView: View {
                     } label: {
                         Label("VPN Passthrough", systemImage: "lock.shield")
                     }
+
                 }
 
                 Section("Quality") {
@@ -112,11 +119,6 @@ struct RouterSettingsListView: View {
                         Label("Device Controls", systemImage: "power")
                     }
 
-                    NavigationLink {
-                        ScheduleRebootView(viewModel: ScheduleRebootViewModel(client: client, authManager: authManager))
-                    } label: {
-                        Label("Scheduled Reboot", systemImage: "clock.arrow.circlepath")
-                    }
                 }
             }
             .navigationTitle("Router")

@@ -28,10 +28,10 @@ final class WiFiSettingsViewModel {
     var editBandwidth2g: String = "auto"
     var editBandwidth5g: String = "auto"
 
-    private let client: UbusClient
+    private let client: AgentClient
     private let authManager: AuthManager
 
-    init(client: UbusClient, authManager: AuthManager) {
+    init(client: AgentClient, authManager: AuthManager) {
         self.client = client
         self.authManager = authManager
     }
@@ -39,71 +39,22 @@ final class WiFiSettingsViewModel {
     func refresh() async {
         isLoading = true
         message = nil
-        let token = authManager.sessionToken
 
-        // Try companion wifi_status first (single call, all fields)
-        if let (_, companionData) = try? await client.call(
-            sessionToken: token,
-            object: "zte-companion",
-            method: "wifi_status",
-            params: [:]
-        ), companionData["error"] == nil, companionData["htmode_2g"] != nil {
-            config = WiFiParser.parse(companionData)
+        // Try native /api/wifi/status first (single call, all fields)
+        if let wifiData = try? await client.getJSON("/api/wifi/status"),
+           wifiData["htmode_2g"] != nil {
+            config = WiFiParser.parse(wifiData)
             syncEditFields()
             isLoading = false
             return
         }
 
-        // Fallback to zwrt_wlan multi-call approach
-        do {
-            let (_, data) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_wlan",
-                method: "status",
-                params: [:]
-            )
-            config = WiFiParser.parse(data)
-
-            async let zteMbbResult = try? client.call(
-                sessionToken: token,
-                object: "zwrt_wlan",
-                method: "wlan_uci_get_section",
-                params: ["section": "zte_mbb"]
-            )
-            async let wifi0Result = try? client.call(
-                sessionToken: token,
-                object: "zwrt_wlan",
-                method: "wlan_uci_get_section",
-                params: ["section": "wifi0"]
-            )
-            async let wifi1Result = try? client.call(
-                sessionToken: token,
-                object: "zwrt_wlan",
-                method: "wlan_uci_get_section",
-                params: ["section": "wifi1"]
-            )
-
-            if let (_, zteMbbData) = await zteMbbResult {
-                config.wifi7Enabled = WiFiParser.parseWifi7(zteMbbData)
-            }
-            if let (_, wifi0Data) = await wifi0Result {
-                config.bandwidth2g = WiFiParser.parseBandwidth(wifi0Data)
-            }
-            if let (_, wifi1Data) = await wifi1Result {
-                config.bandwidth5g = WiFiParser.parseBandwidth(wifi1Data)
-            }
-
-            syncEditFields()
-        } catch {
-            showMessage("Failed to load WiFi: \(error.localizedDescription)", isError: true)
-        }
-
+        showMessage("Failed to load WiFi settings", isError: true)
         isLoading = false
     }
 
     func apply() async {
         isLoading = true
-        let token = authManager.sessionToken
         let params: [String: Any] = [
             "ssid_2g": editSSID2g,
             "ssid_5g": editSSID5g,
@@ -126,25 +77,7 @@ final class WiFiSettingsViewModel {
         ]
 
         do {
-            // Try companion wifi_set first
-            if let (_, result) = try? await client.call(
-                sessionToken: token,
-                object: "zte-companion",
-                method: "wifi_set",
-                params: params
-            ), (result["status"] as? String) == "ok" {
-                showMessage("WiFi settings applied — WiFi will restart briefly", isError: false)
-                updateConfigFromEdits()
-                isLoading = false
-                return
-            }
-            // Fallback to zwrt_wlan set
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_wlan",
-                method: "set",
-                params: params
-            )
+            let _ = try await client.putJSON("/api/wifi/settings", body: params)
             showMessage("WiFi settings applied — WiFi will restart briefly", isError: false)
             updateConfigFromEdits()
         } catch {

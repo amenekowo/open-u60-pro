@@ -14,12 +14,11 @@ final class APNViewModel {
     var editingProfile: APNProfile?  // nil = adding, non-nil = editing
     var setAsDefault: Bool = false
 
-    private let client: UbusClient
+    private let client: AgentClient
     private let authManager: AuthManager
 
     var isEditing: Bool { editingProfile != nil }
 
-    /// The currently active APN name for display
     var activeAPNName: String? {
         let active = config.profiles.first(where: { $0.active })
             ?? config.autoProfiles.first(where: { $0.active })
@@ -27,7 +26,7 @@ final class APNViewModel {
         return active.name.isEmpty ? active.apn : active.name
     }
 
-    init(client: UbusClient, authManager: AuthManager) {
+    init(client: AgentClient, authManager: AuthManager) {
         self.client = client
         self.authManager = authManager
     }
@@ -35,31 +34,15 @@ final class APNViewModel {
     func refresh() async {
         isLoading = true
         message = nil
-        let token = authManager.sessionToken
 
         do {
-            let (_, modeData) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_apn_object",
-                method: "get_apn_mode",
-                params: [:]
-            )
+            let modeData = try await client.getJSON("/api/router/apn/mode")
             let mode = APNParser.parseMode(modeData)
 
-            let (_, manuData) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_apn_object",
-                method: "get_manu_apn_list",
-                params: [:]
-            )
+            let manuData = try await client.getJSON("/api/router/apn/profiles")
             let profiles = APNParser.parseProfiles(manuData)
 
-            let (_, autoData) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_apn_object",
-                method: "get_auto_apn_list",
-                params: [:]
-            )
+            let autoData = try await client.getJSON("/api/router/apn/auto-profiles")
             let autoProfiles = APNParser.parseProfiles(autoData)
 
             config = APNConfig(mode: mode, profiles: profiles, autoProfiles: autoProfiles)
@@ -72,15 +55,9 @@ final class APNViewModel {
 
     func setMode(manual: Bool) async {
         isLoading = true
-        let token = authManager.sessionToken
 
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_apn_object",
-                method: "set_apn_mode",
-                params: ["apn_mode": manual ? 1 : 0]
-            )
+            let _ = try await client.putJSON("/api/router/apn/mode", body: ["apn_mode": manual ? 1 : 0])
             showMessage("APN mode set to \(manual ? "manual" : "auto")", isError: false)
             config = APNConfig(
                 mode: manual ? "1" : "0",
@@ -116,7 +93,6 @@ final class APNViewModel {
             return
         }
 
-        // Duplicate name check (exclude self when editing)
         let isDuplicate = config.profiles.contains { p in
             p.name == formProfile.name && p.id != (editingProfile?.id ?? "")
         }
@@ -134,33 +110,22 @@ final class APNViewModel {
 
     private func addAPN() async {
         isLoading = true
-        let token = authManager.sessionToken
 
         let name = formProfile.name
         let apn = formProfile.apn
-        let pdpType = formProfile.pdpType
-        let authMode = formProfile.authMode
-        let username = formProfile.username
-        let password = formProfile.password
         let shouldSetDefault = setAsDefault
 
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_apn_object",
-                method: "add_manu_apn",
-                params: [
-                    "profilename": name,
-                    "wanapn": apn,
-                    "pdpType": pdpType,
-                    "pppAuthMode": authMode,
-                    "username": username,
-                    "password": password
-                ]
-            )
+            let _ = try await client.postJSON("/api/router/apn/profiles", body: [
+                "profilename": name,
+                "wanapn": apn,
+                "pdpType": formProfile.pdpType,
+                "pppAuthMode": formProfile.authMode,
+                "username": formProfile.username,
+                "password": formProfile.password
+            ])
 
             if shouldSetDefault {
-                // Refresh to get the new profile's ID, then activate it
                 await refresh()
                 if let newProfile = config.profiles.first(where: { $0.name == name && $0.apn == apn }) {
                     await activateAPN(newProfile)
@@ -182,23 +147,17 @@ final class APNViewModel {
         guard let editing = editingProfile else { return }
 
         isLoading = true
-        let token = authManager.sessionToken
 
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_apn_object",
-                method: "modify_manu_apn",
-                params: [
-                    "profileId": editing.id,
-                    "profilename": formProfile.name,
-                    "wanapn": formProfile.apn,
-                    "pdpType": formProfile.pdpType,
-                    "pppAuthMode": formProfile.authMode,
-                    "username": formProfile.username,
-                    "password": formProfile.password
-                ]
-            )
+            let _ = try await client.putJSON("/api/router/apn/profiles", body: [
+                "profileId": editing.id,
+                "profilename": formProfile.name,
+                "wanapn": formProfile.apn,
+                "pdpType": formProfile.pdpType,
+                "pppAuthMode": formProfile.authMode,
+                "username": formProfile.username,
+                "password": formProfile.password
+            ])
 
             if setAsDefault && !editing.active {
                 await activateAPN(editing)
@@ -222,15 +181,9 @@ final class APNViewModel {
         }
 
         isLoading = true
-        let token = authManager.sessionToken
 
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_apn_object",
-                method: "delete_manu_apn",
-                params: ["profileId": profile.id]
-            )
+            let _ = try await client.postJSON("/api/router/apn/profiles/delete", body: ["profileId": profile.id])
             showMessage("APN deleted", isError: false)
             config.profiles.removeAll { $0.id == profile.id }
         } catch {
@@ -242,15 +195,9 @@ final class APNViewModel {
 
     func activateAPN(_ profile: APNProfile) async {
         isLoading = true
-        let token = authManager.sessionToken
 
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_apn_object",
-                method: "enable_manu_apn_id",
-                params: ["profileId": profile.id]
-            )
+            let _ = try await client.postJSON("/api/router/apn/profiles/activate", body: ["profileId": profile.id])
             showMessage("APN activated", isError: false)
             config.profiles = config.profiles.map { p in
                 var updated = p

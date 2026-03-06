@@ -116,3 +116,64 @@ struct BatteryCardView: View {
         return "battery.25"
     }
 }
+
+struct BatteryDetailSheet: View {
+    let battery: BatteryStatus
+
+    var body: some View {
+        NavigationStack {
+            List {
+                row("Capacity", icon: batteryIcon(battery.capacity), value: "\(battery.capacity)%")
+                row("Status", icon: "bolt.fill", value: statusLabel)
+                if let mv = battery.voltageMV {
+                    row("Voltage", icon: "bolt.circle", value: String(format: "%.3f V", Double(mv) / 1000.0))
+                }
+                if let ma = battery.currentMA {
+                    row("Current", icon: "arrow.left.arrow.right", value: "\(ma > 0 ? "+" : "")\(ma) mA")
+                }
+                if let mv = battery.voltageMV, let ma = battery.currentMA {
+                    let watts = Double(mv) * Double(abs(ma)) / 1_000_000.0
+                    row("Power", icon: "flame", value: String(format: "%.1f W", watts))
+                }
+                row("Temperature", icon: "thermometer.medium", value: String(format: "%.1f \u{00B0}C", battery.temperature))
+                row("Time to Full", icon: "battery.100.bolt", value: battery.charging == "charging" && battery.timeToFull > 0 ? formatETA(battery.timeToFull) : "—")
+                row("Time to Empty", icon: "battery.25", value: battery.charging == "discharging" && battery.timeToEmpty > 0 ? formatETA(battery.timeToEmpty) : "—")
+            }
+            .navigationTitle("Battery Details")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    private func row(_ label: String, icon: String, value: String) -> some View {
+        HStack {
+            Label(label, systemImage: icon)
+            Spacer()
+            Text(value)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+    }
+
+    private var statusLabel: String {
+        switch battery.charging {
+        case "wall": return "Wall Mode"
+        case "charging": return battery.capacity >= 100 ? "Full" : "Charging"
+        default: return "Discharging"
+        }
+    }
+
+    private func formatETA(_ minutes: Int) -> String {
+        if minutes >= 1440 {
+            let d = minutes / 1440, h = (minutes % 1440) / 60, m = minutes % 60
+            return "\(d)d \(h)h \(m)m"
+        }
+        return minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m" : "\(minutes)m"
+    }
+
+    private func batteryIcon(_ percent: Int) -> String {
+        if percent >= 75 { return "battery.100" }
+        if percent >= 50 { return "battery.75" }
+        if percent >= 25 { return "battery.50" }
+        return "battery.25"
+    }
+}

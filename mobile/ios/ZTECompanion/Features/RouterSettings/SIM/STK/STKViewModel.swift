@@ -18,10 +18,10 @@ final class STKViewModel {
     var message: String?
     var messageIsError: Bool = false
 
-    private let client: UbusClient
+    private let client: AgentClient
     private let authManager: AuthManager
 
-    init(client: UbusClient, authManager: AuthManager) {
+    init(client: AgentClient, authManager: AuthManager) {
         self.client = client
         self.authManager = authManager
     }
@@ -43,11 +43,7 @@ final class STKViewModel {
         message = nil
 
         do {
-            let (_, data) = try await client.callAnon(
-                object: "zte-companion",
-                method: "ussd_send",
-                params: ["code": code]
-            )
+            let data = try await client.postJSON("/api/ussd/send", body: ["code": code])
 
             if let error = STKParser.parseError(data) {
                 showMessage(error, isError: true)
@@ -69,11 +65,7 @@ final class STKViewModel {
         isLoading = true
 
         do {
-            let (_, data) = try await client.callAnon(
-                object: "zte-companion",
-                method: "ussd_respond",
-                params: ["reply": reply]
-            )
+            let data = try await client.postJSON("/api/ussd/respond", body: ["reply": reply])
 
             if let error = STKParser.parseError(data) {
                 showMessage(error, isError: true)
@@ -92,10 +84,7 @@ final class STKViewModel {
         isLoading = true
 
         do {
-            let (_, _) = try await client.callAnon(
-                object: "zte-companion",
-                method: "ussd_cancel"
-            )
+            let _ = try await client.postJSON("/api/ussd/cancel")
             ussdResponse = .empty
             showUssdResponse = false
             ussdReply = ""
@@ -114,10 +103,7 @@ final class STKViewModel {
         message = nil
 
         do {
-            let (_, data) = try await client.callAnon(
-                object: "zte-companion",
-                method: "stk_get_menu"
-            )
+            let data = try await client.getJSON("/api/stk/menu")
 
             if let error = STKParser.parseError(data) {
                 let hint = data["hint"] as? String
@@ -137,11 +123,7 @@ final class STKViewModel {
         isLoading = true
 
         do {
-            let (_, data) = try await client.callAnon(
-                object: "zte-companion",
-                method: "stk_select_item",
-                params: ["item_id": item.id]
-            )
+            let data = try await client.postJSON("/api/stk/select", body: ["item_id": item.id])
 
             if let error = STKParser.parseError(data) {
                 showMessage(error, isError: true)

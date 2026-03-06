@@ -1,6 +1,6 @@
 # ZTE Companion — Mobile Apps for ZTE U60 Pro (MU5250)
 
-Native companion apps for the ZTE U60 Pro 5G mobile router. Connect directly to the router's ubus HTTP API over WiFi — no intermediate server, no ADB required.
+Native companion apps for the ZTE U60 Pro 5G mobile router. Connect to the `zte-agent` REST API running on the router over WiFi — no ADB required.
 
 ## Features
 
@@ -8,20 +8,43 @@ Native companion apps for the ZTE U60 Pro 5G mobile router. Connect directly to 
 |---|---|---|
 | Signal Monitoring | Full | Live NR 5G / LTE / WCDMA metrics with color-coded thresholds |
 | RSRP History Chart | Full | Scrollable chart tracking signal strength over time |
-| Battery & Thermal | Full | Battery %, temperature, CPU thermal |
+| Battery & Thermal | Full | Battery %, temperature, CPU thermal, charge policy |
 | Traffic Stats | Full | Real-time DL/UL speed (Mbps), total bytes transferred |
 | Connected Devices | Full | MAC, hostname, IPv4/IPv6 via host hints + DHCP enrichment |
 | Device Info | Full | SIM (ICCID, IMSI, MSISDN), IMEI, WAN/LAN IPs |
 | Band Lock/Unlock | Full | Lock NR5G NSA/SA and LTE bands, unlock all |
+| Cell Lock | Full | Lock to specific NR/LTE cells by PCI/EARFCN |
+| STC Cell Lock | Full | Smart traffic control cell locking |
+| Signal Detection | Full | Signal quality measurement with progress tracking |
+| WiFi Settings | Full | SSID, password, channel, bandwidth, tx power, WiFi 6 |
+| Guest WiFi | Full | Guest network enable/disable, SSID, timer |
+| SMS | Full | Read, send, delete SMS; mark as read |
+| SIM Management | Full | PIN verify/change/enable/disable, PUK unlock, SIM unlock |
+| Mobile Network | Full | Data toggle, airplane mode, network scan, manual register |
+| Network Mode | Full | Auto/manual network selection |
+| APN Settings | Full | Auto/manual APN mode, add/edit/delete/activate profiles |
+| DNS Settings | Full | Custom DNS configuration |
+| LAN Settings | Full | LAN IP/DHCP configuration |
+| Firewall | Full | Switch, level, NAT, DMZ, UPnP, port forwarding, filter rules |
+| VPN Passthrough | Full | VPN passthrough toggle |
+| QoS | Full | Quality of service toggle |
+| Telemetry Blocker | Full | Domain filter rules for blocking telemetry |
+| Schedule Reboot | Full | Automatic reboot scheduling |
+| Device Control | Full | Reboot, factory reset, power supply mode, power save, fast boot |
+| USB Mode | Full | USB mode switching, powerbank mode |
+| Voice Calls | Full | Dial, answer, hangup, DTMF, mute via AT commands |
+| USSD | Full | Send/respond/cancel USSD sessions |
+| STK Menu | Full | SIM Toolkit menu browsing |
 | Enable ADB | Full | One-tap USB debug mode via WiFi |
 | Config Decrypt/Encrypt | Full | Import .bin, auto-detect key, browse XML, re-encrypt, export |
-| DNS, TTL, Firewall, Telemetry, SSH, Explorer | Placeholder | Requires ADB USB — shown with informational message |
 
 ## Architecture
 
-- **Pattern**: MVVM on both platforms
-- **Transport**: Direct HTTP to router's ubus JSON-RPC 2.0 API (`http://<gateway>/ubus/`)
-- **Auth**: Salt-based double-SHA256 challenge-response with auto-retry on session expiry
+- **Pattern**: MVVM
+- **Transport**: HTTP to `zte-agent` REST API (`http://<router>:9090/api/...`)
+- **Auth**: Token-based (password → bearer token)
+
+The iOS app communicates with `zte-agent`, a lightweight Rust HTTP server deployed on the router. The agent exposes dedicated typed REST endpoints that internally call the router's ubus subsystem and return JSON responses.
 
 ## iOS App
 
@@ -39,11 +62,10 @@ Native companion apps for the ZTE U60 Pro 5G mobile router. Connect directly to 
 |---|---|
 | UI | SwiftUI |
 | HTTP | URLSession |
-| Auth hashing | CryptoKit (SHA-256) |
-| Config crypto | CommonCrypto (AES-128-ECB, AES-256-CBC) |
-| Compression | Compression framework (zlib) |
 | Charts | Swift Charts |
 | Secure storage | Keychain Services |
+| Config crypto | CommonCrypto (AES-128-ECB, AES-256-CBC) |
+| Compression | Compression framework (zlib) |
 | Key derivation | CryptoKit (Insecure.MD5) |
 
 ### Project Structure
@@ -53,171 +75,102 @@ ios/ZTECompanion/
 ├── ZTECompanionApp.swift                  App entry point
 ├── Core/
 │   ├── Networking/
-│   │   ├── UbusClient.swift               JSON-RPC 2.0 client (URLSession)
-│   │   ├── AuthManager.swift              Salt fetch, double-SHA256, Keychain helper
-│   │   └── UbusError.swift                Error types
+│   │   ├── AgentClient.swift              REST client (getJSON/postJSON/putJSON)
+│   │   ├── AgentError.swift               Error types
+│   │   └── AuthManager.swift              Token auth, Keychain helper
+│   ├── Components/
+│   │   └── WiFiQRGenerator.swift          WiFi QR code generation
 │   ├── Crypto/
 │   │   ├── ZTEConfigCrypto.swift          AES-ECB/CBC, header parsing, key derivation
 │   │   └── ZTECompression.swift           ZLIB plain/chunked/raw decompress + compress
 │   ├── Models/
 │   │   ├── SignalModels.swift             NRSignal, LTESignal, WCDMASignal, OperatorInfo
 │   │   ├── DeviceModels.swift             Battery, Thermal, Traffic, ConnectedDevice
+│   │   ├── RouterSettingsModels.swift     Firewall, DNS, LAN, APN, etc.
 │   │   ├── BandModels.swift               BandConfig
 │   │   └── ConfigModels.swift             ConfigHeader, PayloadType, known keys table
 │   └── Extensions/
 │       └── ColorExtensions.swift          RSRP/SINR color thresholds
 ├── Features/
-│   ├── Dashboard/                         Summary cards (signal, battery, speed, devices)
+│   ├── Dashboard/                         Summary cards (signal, battery, speed, WiFi, devices)
 │   ├── Signal/                            Live NR/LTE/WCDMA panels + RSRP chart
 │   ├── BandLock/                          NR/LTE band selection grid, lock/unlock
+│   ├── SMS/                               Conversations, send/delete, mark read
+│   ├── Call/                              Voice calls, DTMF, mute
 │   ├── DeviceInfo/                        SIM, IMEI, WAN/LAN IPs
 │   ├── Clients/                           Connected devices list
 │   ├── Config/                            Import, decrypt, XML browser, re-encrypt, export
-│   ├── Tools/                             Tools list, Enable ADB, placeholder screens
-│   ├── Settings/                          Gateway IP, password, poll interval, theme
-│   └── Login/                             Modal login overlay
+│   ├── USBMode/                           USB mode switching, powerbank
+│   ├── RouterSettings/                    All router configuration screens
+│   │   ├── APN/                           APN profiles management
+│   │   ├── CellLock/                      Cell lock by PCI/EARFCN
+│   │   ├── DNS/                           DNS settings
+│   │   ├── Device/                        Reboot, reset, power modes
+│   │   ├── Firewall/                      Firewall, NAT, DMZ, port forward
+│   │   ├── LAN/                           LAN settings
+│   │   ├── MobileNetwork/                 Data, airplane, network scan
+│   │   ├── NetworkMode/                   Network selection mode
+│   │   ├── QoS/                           Quality of service
+│   │   ├── SIM/                           SIM/PIN management, STK
+│   │   ├── STC/                           Smart traffic control
+│   │   ├── Schedule/                      Scheduled reboot
+│   │   ├── SignalDetect/                  Signal quality detection
+│   │   ├── Telemetry/                     Telemetry domain filter
+│   │   ├── VPN/                           VPN passthrough
+│   │   └── WiFi/                          WiFi + guest WiFi settings
+│   ├── Tools/                             Tools list, Enable ADB
+│   └── Settings/                          Agent URL, password, poll interval, theme
 └── Navigation/
-    └── TabBarView.swift                   Dashboard | Signal | Tools | Settings
+    └── TabBarView.swift                   Dashboard | Signal | SMS | Tools | Settings
 ```
 
 ### Setup
 
-1. Open the project in Xcode
-2. Add the source files to a new iOS App target (SwiftUI lifecycle)
-3. Add `NSAppTransportSecurity` → `NSAllowsArbitraryLoads = YES` to `Info.plist`
-4. Build and run on device or simulator
+1. Build `zte-agent`: `cargo build --release --target aarch64-unknown-linux-musl -p zte-agent`
+2. Deploy to router via ADB or SCP (see root README for details)
+3. Open the project in Xcode
+4. Add `NSAppTransportSecurity` → `NSAllowsArbitraryLoads = YES` to `Info.plist`
+5. Build and run on device or simulator
+6. Connect to the router's WiFi and set the agent URL (default: `http://192.168.0.1:9090`)
 
-## Android App
+## Agent REST API
 
-**Path**: `android/ZTECompanion/`
+The iOS app communicates exclusively through typed REST endpoints on `zte-agent`. Key endpoint groups:
 
-### Requirements
-
-- Android 8.0+ (API 26)
-- Android Studio Hedgehog (2023.1) or newer
-- JDK 17
-
-### Tech Stack
-
-| Component | Implementation |
-|---|---|
-| UI | Jetpack Compose + Material 3 |
-| HTTP | OkHttp 4.12 |
-| JSON | kotlinx.serialization 1.7 |
-| Auth hashing | java.security.MessageDigest (SHA-256) |
-| Config crypto | javax.crypto.Cipher (AES-128-ECB, AES-256-CBC) |
-| Compression | java.util.zip.Inflater |
-| Charts | Vico 2.0 |
-| DI | Hilt 2.54 |
-| Secure storage | EncryptedSharedPreferences |
-| Navigation | Navigation Compose |
-
-### Project Structure
-
-```
-android/ZTECompanion/
-├── build.gradle.kts                       Root build config (AGP, Kotlin, Hilt, KSP)
-├── settings.gradle.kts                    Module includes
-├── gradle.properties                      AndroidX, non-transitive R, JVM args
-└── app/
-    ├── build.gradle.kts                   Dependencies (Compose, OkHttp, Hilt, Vico, etc.)
-    └── src/main/
-        ├── AndroidManifest.xml            INTERNET permission, cleartext traffic
-        ├── res/
-        │   ├── xml/network_security_config.xml
-        │   └── values/                    strings.xml, colors.xml, themes.xml
-        └── java/com/ztecompanion/
-            ├── ZTECompanionApp.kt         @HiltAndroidApp application class
-            ├── MainActivity.kt            Single-activity Compose host
-            ├── core/
-            │   ├── network/
-            │   │   ├── UbusClient.kt      JSON-RPC 2.0 client (OkHttp)
-            │   │   ├── AuthManager.kt     Auth + EncryptedSharedPreferences + gateway detect
-            │   │   └── UbusError.kt       Sealed class error hierarchy
-            │   ├── crypto/
-            │   │   ├── ZTEConfigCrypto.kt AES-ECB/CBC, header parsing, key derivation
-            │   │   └── ZTECompression.kt  ZLIB plain/chunked/raw decompression
-            │   ├── model/
-            │   │   ├── SignalModels.kt    NRSignal, LTESignal, WCDMASignal, OperatorInfo
-            │   │   ├── DeviceModels.kt    Battery, Thermal, Traffic, ConnectedDevice
-            │   │   ├── BandModels.kt      BandConfig
-            │   │   └── ConfigModels.kt    ConfigHeader, PayloadType, known keys table
-            │   └── di/
-            │       └── AppModule.kt       Hilt module (UbusClient, AuthManager providers)
-            ├── feature/
-            │   ├── dashboard/             Summary cards (signal, battery, speed, devices)
-            │   ├── signal/                Live NR/LTE/WCDMA panels + RSRP sparkline
-            │   ├── bandlock/              NR/LTE band chips, lock/unlock
-            │   ├── deviceinfo/            SIM, IMEI, WAN/LAN IPs
-            │   ├── clients/               Connected devices list
-            │   ├── config/                SAF import, decrypt, XML viewer, re-encrypt, export
-            │   ├── tools/                 Tools list, Enable ADB, placeholder screens
-            │   ├── settings/              Gateway, poll interval, dark mode, logout
-            │   └── login/                 Login form with gateway field
-            └── navigation/
-                └── AppNavigation.kt       NavHost + BottomNavBar
-```
-
-### Setup
-
-1. Open `android/ZTECompanion/` in Android Studio
-2. Sync Gradle (dependencies download automatically)
-3. Build and run on device or emulator
-
-## How It Works
-
-### Connection
-
-Both apps connect directly to the router over WiFi. The router exposes a ubus JSON-RPC 2.0 API at `http://<gateway>/ubus/`.
-
-**Gateway auto-detection:**
-- iOS: `getifaddrs()` to find the default gateway
-- Android: `WifiManager.getDhcpInfo().gateway`
-- Fallback: `192.168.0.1`
+| Group | Endpoints | Description |
+|---|---|---|
+| `/api/network/*` | signal, wan, wan6, lan-status, clients, speeds, rmnet, traffic | Network status |
+| `/api/device/*` | thermal, charger, system, battery-info, reboot, factory-reset, power-supply, power-save | Device info & control |
+| `/api/wifi/*` | status, settings, guest | WiFi configuration |
+| `/api/modem/*` | status, online, data, airplane, network-mode, scan/*, register/*, schedule-reboot | Modem control |
+| `/api/sms/*` | list, capacity, send, delete, read | SMS management |
+| `/api/sim/*` | info, imei, pin/*, unlock, lock-trials | SIM management |
+| `/api/cell/*` | lock/*, neighbors/*, band/*, stc/*, signal-detect/* | Cell & band locking |
+| `/api/router/*` | dns, lan, firewall/*, vpn, qos, domain-filter, apn/* | Router configuration |
+| `/api/usb/*` | status, mode, powerbank | USB management |
+| `/api/call/*` | dial, hangup, answer, status, dtmf, mute | Voice calls (AT) |
+| `/api/ussd/*` | send, respond, cancel | USSD sessions (AT) |
+| `/api/stk/*` | menu, select | SIM Toolkit (AT) |
+| `/api/battery` | — | Battery (sysfs) |
+| `/api/cpu` | — | CPU usage |
+| `/api/memory` | — | Memory info |
 
 ### Authentication
 
-The ZTE U60 Pro uses a salt-based double-SHA256 challenge-response:
+1. Set `ZTE_AGENT_PASSWORD` env var when starting the agent
+2. `POST /api/auth/login` with `{"password": "..."}` → receive bearer token
+3. Include `Authorization: Bearer <token>` on all subsequent requests
 
-1. Fetch salt (anonymous call to `zwrt_web.web_login_info` — field name is `zte_web_sault`)
-2. Hash: `UPPER(SHA256(UPPER(SHA256(password)) + salt))`
-3. Login: `zwrt_web.web_login` with the hash → receive session token
-4. Session tokens expire after ~5 minutes; the apps automatically re-authenticate
-
-Salt fetch can be flaky — both apps retry up to 3 times with 500ms delays.
-
-### ubus API Endpoints
-
-| Feature | Object | Method | Params |
-|---|---|---|---|
-| Signal data | `zte_nwinfo_api` | `nwinfo_get_netinfo` | `{}` |
-| Battery | `zwrt_bsp.battery` | `list` | `{}` |
-| CPU temperature | `zwrt_bsp.thermal` | `get_cpu_temp` | `{}` |
-| Traffic stats | `network.device` | `status` | `{"name":"rmnet_data0"}` |
-| Connected devices | `luci-rpc` | `getHostHints` | `{}` |
-| DHCP leases | `luci-rpc` | `getDHCPLeases` | `{"family":4}` |
-| SIM info | `zwrt_zte_mdm.api` | `get_sim_info` | `{}` |
-| IMEI | `zwrt_zte_mdm.api` | `get_imei` | `{}` |
-| WAN IPv4 | `network.interface.zte_wan` | `status` | `{}` |
-| WAN IPv6 | `network.interface.zte_wan6` | `status` | `{}` |
-| LAN/Gateway | `network.interface.lan` | `status` | `{}` |
-| Lock NR bands | `zte_nwinfo_api` | `nwinfo_set_nrbandlock` | `{"nr5g_type":"nsa","nr5g_band":"77,78"}` |
-| Lock LTE bands | `zte_nwinfo_api` | `nwinfo_set_gwl_bandlock` | `{"is_lte_band":"1","lte_band_mask":"1,3,7",...}` |
-| Unlock all bands | `zte_nwinfo_api` | `nwinfo_rest_band_rat` | `{}` |
-| Enable ADB | `zwrt_bsp.usb` | `set` | `{"mode":"debug"}` |
-| Fetch auth salt | `zwrt_web` | `web_login_info` | `{}` |
-| Login | `zwrt_web` | `web_login` | `{"password":"<hash>"}` |
-
-### Signal Color Thresholds
+## Signal Color Thresholds
 
 | Metric | Green | Yellow | Orange | Red |
 |---|---|---|---|---|
 | RSRP (dBm) | >= -80 | >= -100 | >= -110 | < -110 |
 | SINR (dB) | >= 20 | >= 10 | >= 0 | < 0 |
 
-### Config Decrypt/Encrypt
+## Config Decrypt/Encrypt
 
-The apps can decrypt and re-encrypt ZTE router configuration backup files (`.bin`):
+The app can decrypt and re-encrypt ZTE router configuration backup files (`.bin`):
 
 - **Header**: 128 bytes starting with `ZXHN` magic
   - Payload type at offset 4: ECB (0), CBC (1), Plain (2), CBC New (3)
@@ -227,42 +180,9 @@ The apps can decrypt and re-encrypt ZTE router configuration backup files (`.bin
 - **Compression**: ZLIB — plain, chunked (4-byte BE length prefix per chunk), or raw deflate
 - **Key resolution**: Tries 14 known static keys + MD5(serial)[:16] + MD5(signature)[:16]
 
-## Navigation
+## Relation to zte-agent
 
-```
-Tab Bar
-├── Dashboard ─── Summary cards (signal, battery, speed, device count)
-├── Signal ────── Live NR/LTE/WCDMA panels + RSRP history chart
-│   └── Band Lock (sub-screen)
-├── Tools ─────── List of tools:
-│   ├── Device Info (SIM, IMEI, IPs)
-│   ├── Connected Devices
-│   ├── Enable ADB
-│   ├── Config Tool (decrypt/encrypt)
-│   ├── DNS Config [placeholder]
-│   ├── TTL Masking [placeholder]
-│   ├── Firewall [placeholder]
-│   ├── Telemetry Block [placeholder]
-│   ├── SSH Enabler [placeholder]
-│   └── Device Explorer [placeholder]
-└── Settings ──── Gateway IP, password, poll interval, theme
-    └── Login (modal overlay on first launch / auth failure)
-```
-
-## Relation to CLI Toolkit
-
-These mobile apps are companions to the Python CLI toolkit in the parent directory. The CLI tools use ADB/USB for full device access, while the mobile apps use WiFi/HTTP for features available through the ubus API.
-
-| Capability | CLI (Python) | Mobile Apps |
-|---|---|---|
-| Signal monitoring | ADB ubus + AT commands + WiFi | WiFi HTTP only |
-| Band locking | ADB ubus | WiFi HTTP |
-| Config decrypt | Local file + Python crypto | On-device (CommonCrypto / javax.crypto) |
-| SSH enabler | ADB (dropbear install) | Placeholder |
-| TTL masking | ADB (iptables) | Placeholder |
-| DNS config | ADB (resolv.conf) | Placeholder |
-| Firewall | ADB (iptables) | Placeholder |
-| Device explorer | ADB shell | Placeholder |
+The mobile app connects to `zte-agent`, a lightweight Rust HTTP server deployed on the router. The agent runs directly on the device and exposes all router functionality through typed REST endpoints — the mobile app is a pure front-end with no direct ubus/AT/sysfs access.
 
 ## License
 

@@ -21,12 +21,12 @@ struct DNSConfig: Equatable {
 enum DNSParser {
     static func parse(_ data: [String: Any]) -> DNSConfig {
         DNSConfig(
-            wanDnsMode: data["wan_dns_mode"] as? String ?? "",
-            primaryDns: data["wan_prefer_dns_manual"] as? String ?? "",
-            secondaryDns: data["wan_standby_dns_manual"] as? String ?? "",
-            ipv6PrimaryDns: data["ipv6_wan_prefer_dns_manual"] as? String ?? "",
-            ipv6SecondaryDns: data["ipv6_wan_standby_dns_manual"] as? String ?? "",
-            ipv6DnsMode: data["ipv6_wan_dns_mode"] as? String ?? ""
+            wanDnsMode: data["dns_mode"] as? String ?? "",
+            primaryDns: data["prefer_dns_manual"] as? String ?? "",
+            secondaryDns: data["standby_dns_manual"] as? String ?? "",
+            ipv6PrimaryDns: data["ipv6_prefer_dns_manual"] as? String ?? "",
+            ipv6SecondaryDns: data["ipv6_standby_dns_manual"] as? String ?? "",
+            ipv6DnsMode: data["ipv6_dns_mode"] as? String ?? ""
         )
     }
 }
@@ -170,4 +170,60 @@ enum TelemetryParser {
         "mcs-cloud.ztems.com",
         "update.ztems.com"
     ]
+}
+
+// MARK: - DoH (DNS-over-HTTPS)
+
+struct DoHStatus: Equatable {
+    var enabled: Bool
+    var upstreamUrl: String
+    var cacheEntries: Int
+    var cacheHits: Int
+    var cacheMisses: Int
+    var queriesTotal: Int
+
+    static let empty = DoHStatus(
+        enabled: false, upstreamUrl: "", cacheEntries: 0,
+        cacheHits: 0, cacheMisses: 0, queriesTotal: 0
+    )
+
+    var hitRatio: Double {
+        let total = cacheHits + cacheMisses
+        return total > 0 ? Double(cacheHits) / Double(total) * 100 : 0
+    }
+}
+
+struct DoHCacheEntry: Identifiable, Equatable {
+    let domain: String
+    let type_: String
+    let typeId: Int
+    let ttl: Int
+    var id: String { "\(domain)-\(typeId)" }
+}
+
+enum DoHParser {
+    static func parse(_ data: [String: Any]) -> DoHStatus {
+        let running = data["running"] as? Bool ?? false
+        let config = data["config"] as? [String: Any] ?? [:]
+        let stats = data["stats"] as? [String: Any] ?? [:]
+        return DoHStatus(
+            enabled: running,
+            upstreamUrl: config["upstream_url"] as? String ?? "",
+            cacheEntries: stats["cache_entries"] as? Int ?? 0,
+            cacheHits: stats["cache_hits"] as? Int ?? 0,
+            cacheMisses: stats["cache_misses"] as? Int ?? 0,
+            queriesTotal: stats["queries_total"] as? Int ?? 0
+        )
+    }
+
+    static func parseCacheEntries(_ list: [[String: Any]]) -> [DoHCacheEntry] {
+        list.map { entry in
+            DoHCacheEntry(
+                domain: entry["domain"] as? String ?? "",
+                type_: entry["type"] as? String ?? "?",
+                typeId: entry["type_id"] as? Int ?? 0,
+                ttl: entry["ttl"] as? Int ?? 0
+            )
+        }
+    }
 }

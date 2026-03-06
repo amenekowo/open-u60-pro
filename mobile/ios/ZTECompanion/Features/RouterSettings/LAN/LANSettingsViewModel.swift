@@ -16,10 +16,10 @@ final class LANSettingsViewModel {
     var editDhcpEnd: String = ""
     var editLeaseTime: String = ""
 
-    private let client: UbusClient
+    private let client: AgentClient
     private let authManager: AuthManager
 
-    init(client: UbusClient, authManager: AuthManager) {
+    init(client: AgentClient, authManager: AuthManager) {
         self.client = client
         self.authManager = authManager
     }
@@ -27,15 +27,9 @@ final class LANSettingsViewModel {
     func refresh() async {
         isLoading = true
         message = nil
-        let token = authManager.sessionToken
 
         do {
-            let (_, data) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_router.api",
-                method: "router_get_lan_para",
-                params: [:]
-            )
+            let data = try await client.getJSON("/api/router/lan")
             config = LANParser.parse(data)
             syncEditFields()
         } catch {
@@ -52,22 +46,16 @@ final class LANSettingsViewModel {
         }
 
         isLoading = true
-        let token = authManager.sessionToken
 
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_router.api",
-                method: "router_set_lan_para",
-                params: [
-                    "lan_ipaddr": editLanIP,
-                    "lan_netmask": editNetmask,
-                    "dhcp_enable": editDhcpEnabled ? "1" : "0",
-                    "dhcp_start": editDhcpStart,
-                    "dhcp_end": editDhcpEnd,
-                    "dhcp_lease_time": editLeaseTime
-                ]
-            )
+            let _ = try await client.putJSON("/api/router/lan", body: [
+                "lan_ipaddr": editLanIP,
+                "lan_netmask": editNetmask,
+                "dhcp_enable": editDhcpEnabled ? "1" : "0",
+                "dhcp_start": editDhcpStart,
+                "dhcp_end": editDhcpEnd,
+                "dhcp_lease_time": editLeaseTime
+            ])
             showMessage("LAN settings updated", isError: false)
             config = LANConfig(lanIP: editLanIP, netmask: editNetmask, dhcpEnabled: editDhcpEnabled,
                                dhcpStart: editDhcpStart, dhcpEnd: editDhcpEnd, dhcpLeaseTime: editLeaseTime)

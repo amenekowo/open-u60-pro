@@ -14,24 +14,17 @@ final class DeviceControlViewModel {
     private var powerSupplyLoaded: Bool = false
     private var powerSaveLoaded: Bool = false
     private var fastBootLoaded: Bool = false
-    private let client: UbusClient
+    private let client: AgentClient
     private let authManager: AuthManager
 
-    init(client: UbusClient, authManager: AuthManager) {
+    init(client: AgentClient, authManager: AuthManager) {
         self.client = client
         self.authManager = authManager
     }
 
     func refresh() async {
-        let token = authManager.sessionToken
-
         do {
-            let (_, data) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_bsp.charger",
-                method: "list",
-                params: [:]
-            )
+            let data = try await client.getJSON("/api/device/charger")
             let mode = (data["direct_power_supply_mode"] as? String ?? "").lowercased()
             if !mode.isEmpty {
                 let newPowerSupply = (mode == "enable" || mode == "1")
@@ -43,12 +36,7 @@ final class DeviceControlViewModel {
         }
 
         do {
-            let (_, psData) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_mc.device.manager",
-                method: "get_device_info",
-                params: ["deviceInfoList": ["power_saver_mode", "quicken_power_on"]]
-            )
+            let psData = try await client.postJSON("/api/device/power-save", body: ["deviceInfoList": ["power_saver_mode", "quicken_power_on"]])
             let psMode = psData["power_saver_mode"] as? String ?? ""
             if !psMode.isEmpty {
                 let newPowerSave = (psMode == "1")
@@ -70,14 +58,8 @@ final class DeviceControlViewModel {
     func setPowerSupply(enabled: Bool) async {
         guard powerSupplyLoaded else { return }
         isLoading = true
-        let token = authManager.sessionToken
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_bsp.charger",
-                method: "set",
-                params: ["direct_power_supply_mode": enabled ? "enable" : "disable"]
-            )
+            let _ = try await client.putJSON("/api/device/power-supply", body: ["direct_power_supply_mode": enabled ? "enable" : "disable"])
             showMessage(enabled ? "Power supply mode enabled" : "Power supply mode disabled", isError: false)
         } catch {
             powerSupplyEnabled = !enabled
@@ -89,14 +71,8 @@ final class DeviceControlViewModel {
     func setPowerSave(enabled: Bool) async {
         guard powerSaveLoaded else { return }
         isLoading = true
-        let token = authManager.sessionToken
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_mc.device.manager",
-                method: "set_device_info",
-                params: ["deviceInfoList": ["power_saver_mode": enabled ? "1" : "0"]]
-            )
+            let _ = try await client.putJSON("/api/device/power-save", body: ["deviceInfoList": ["power_saver_mode": enabled ? "1" : "0"]])
             showMessage(enabled ? "Power-save mode enabled" : "Power-save mode disabled", isError: false)
         } catch {
             powerSaveEnabled = !enabled
@@ -108,14 +84,8 @@ final class DeviceControlViewModel {
     func setFastBoot(enabled: Bool) async {
         guard fastBootLoaded else { return }
         isLoading = true
-        let token = authManager.sessionToken
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_mc.device.manager",
-                method: "set_device_info",
-                params: ["deviceInfoList": ["quicken_power_on": enabled ? "1" : "0"]]
-            )
+            let _ = try await client.putJSON("/api/device/power-save", body: ["deviceInfoList": ["quicken_power_on": enabled ? "1" : "0"]])
             showMessage(enabled ? "Fast boot enabled" : "Fast boot disabled", isError: false)
         } catch {
             fastBootEnabled = !enabled
@@ -126,15 +96,9 @@ final class DeviceControlViewModel {
 
     func reboot() async {
         isLoading = true
-        let token = authManager.sessionToken
 
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_bsp.power",
-                method: "reboot",
-                params: [:]
-            )
+            let _ = try await client.postJSON("/api/device/reboot")
             showMessage("Router is rebooting...", isError: false)
         } catch {
             showMessage("Failed: \(error.localizedDescription)", isError: true)
@@ -145,15 +109,9 @@ final class DeviceControlViewModel {
 
     func factoryReset() async {
         isLoading = true
-        let token = authManager.sessionToken
 
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_bsp.power",
-                method: "factory_reset",
-                params: [:]
-            )
+            let _ = try await client.postJSON("/api/device/factory-reset")
             showMessage("Factory reset initiated...", isError: false)
         } catch {
             showMessage("Failed: \(error.localizedDescription)", isError: true)

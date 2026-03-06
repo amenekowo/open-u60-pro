@@ -17,13 +17,13 @@ final class SettingsViewModel {
     var showSavedConfirmation: Bool = false
     var isDetectingGateway: Bool = false
 
-    private let client: UbusClient
+    private let client: AgentClient
 
     var hasStoredPassword: Bool {
         KeychainHelper.load(key: "router_password") != nil
     }
 
-    init(client: UbusClient) {
+    init(client: AgentClient) {
         self.client = client
         self.gatewayIP = UserDefaults.standard.string(forKey: "gateway_ip") ?? "192.168.0.1"
         let stored = UserDefaults.standard.double(forKey: "poll_interval")
@@ -48,7 +48,7 @@ final class SettingsViewModel {
         defer { isDetectingGateway = false }
         let candidates = ["192.168.0.1", "192.168.1.1", "192.168.2.1", "10.0.0.1"]
         for ip in candidates {
-            client.gatewayIP = ip
+            client.baseURL = "http://\(ip):9090"
             if await client.ping() {
                 gatewayIP = ip
                 return

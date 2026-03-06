@@ -489,6 +489,68 @@ enum WiFiParser {
     }
 }
 
+// MARK: - Guest WiFi
+
+struct GuestWiFiConfig: Equatable {
+    var enabled2g: Bool
+    var enabled5g: Bool
+    var ssid: String
+    var key: String
+    var encryption: String
+    var hidden: Bool
+    var isolate: Bool
+    var activeTime: Int       // minutes (0 = no limit)
+    var remainingSeconds: Int // runtime countdown (-1 = not active)
+
+    static let empty = GuestWiFiConfig(
+        enabled2g: false, enabled5g: false, ssid: "", key: "", encryption: "psk2+ccmp",
+        hidden: false, isolate: true, activeTime: 0, remainingSeconds: -1
+    )
+
+    static let activeTimeOptions: [(label: String, minutes: Int)] = [
+        ("No Limit", 0),
+        ("30 min", 30),
+        ("1 hour", 60),
+        ("2 hours", 120),
+        ("4 hours", 240),
+        ("8 hours", 480),
+        ("12 hours", 720),
+        ("24 hours", 1440)
+    ]
+}
+
+enum GuestWiFiParser {
+    static func parse(_ data: [String: Any]) -> GuestWiFiConfig {
+        GuestWiFiConfig(
+            enabled2g: !asBool(data["disabled_2g"]),
+            enabled5g: !asBool(data["disabled_5g"]),
+            ssid: data["ssid"] as? String ?? "",
+            key: data["key"] as? String ?? "",
+            encryption: data["encryption"] as? String ?? "psk2+ccmp",
+            hidden: asBool(data["hidden"]),
+            isolate: asBool(data["isolate"]),
+            activeTime: asInt(data["guest_active_time"]) ?? 0,
+            remainingSeconds: asInt(data["remaining_seconds"]) ?? -1
+        )
+    }
+
+    private static func asBool(_ value: Any?) -> Bool {
+        if let str = value as? String {
+            return str == "1" || str.lowercased() == "true" || str.lowercased() == "on"
+        }
+        if let num = value as? Int { return num != 0 }
+        if let b = value as? Bool { return b }
+        return false
+    }
+
+    private static func asInt(_ val: Any?) -> Int? {
+        if let i = val as? Int { return i }
+        if let s = val as? String { return Int(s) }
+        if let d = val as? Double { return Int(d) }
+        return nil
+    }
+}
+
 // MARK: - LAN/DHCP
 
 struct LANConfig: Equatable {

@@ -25,35 +25,21 @@ final class DashboardViewModel {
     var error: String?
     var simPinRequired: Bool = false
     var simPukRequired: Bool = false
-    var companionUnavailable: Bool = false
 
-    private let client: UbusClient
+    private let client: AgentClient
     private let authManager: AuthManager
     private var pollTask: Task<Void, Never>?
     private var previousTraffic: TrafficStats?
-    private var prevCpuSample: CpuStatSample?
-    private var cpuFileReadFailCount: Int = 0
-    private var cpuFileReadCooldown: Int = 0
-    private var battCurrentFileReadFailCount: Int = 0
-    private var battCurrentFileReadCooldown: Int = 0
-    private var companionBwFailCount: Int = 0
-    private var companionBwCooldown: Int = 0
-    private var simInfoFailCount: Int = 0
-    private var simInfoCooldown: Int = 0
-    private var cachedCpuCores: Int = 4 // SDX75 default
-    private static let maxCpuFileReadFails = 3
-    private var companionConsecutiveFailures: Int = 0
-    private static let companionUnavailableThreshold = 5
 
     private static func isCancellation(_ error: Error) -> Bool {
         if error is CancellationError { return true }
-        if let ubusError = error as? UbusError,
-           case .networkError(let inner) = ubusError,
+        if let agentError = error as? AgentError,
+           case .networkError(let inner) = agentError,
            (inner as? URLError)?.code == .cancelled { return true }
         return false
     }
 
-    init(client: UbusClient, authManager: AuthManager) {
+    init(client: AgentClient, authManager: AuthManager) {
         self.client = client
         self.authManager = authManager
     }
@@ -75,43 +61,31 @@ final class DashboardViewModel {
 
     func refresh() async {
         logger.debug("refresh start")
-        var token = authManager.sessionToken
         error = nil
 
         // Signal fetch first (needs re-auth check)
-        var signalResult = await fetchSignal(token: token)
+        var signalResult = await fetchSignal()
 
-        // Session expired (ubus code 6)? Re-authenticate once and retry.
+        // Session expired? Re-authenticate once and retry.
         if signalResult == nil, await authManager.reauthenticate() {
-            token = authManager.sessionToken
-            cpuFileReadFailCount = 0
-            cpuFileReadCooldown = 0
-            battCurrentFileReadFailCount = 0
-            battCurrentFileReadCooldown = 0
-            companionBwFailCount = 0
-            companionBwCooldown = 0
-            companionConsecutiveFailures = 0
-            simInfoFailCount = 0
-            simInfoCooldown = 0
-            signalResult = await fetchSignal(token: token)
+            signalResult = await fetchSignal()
         }
 
         // Parallelize remaining independent network calls
-        let t = token
-        async let batteryResult = fetchBattery(token: t)
-        async let chargerResult = fetchCharger(token: t)
-        async let thermalResult = fetchThermal(token: t)
-        async let trafficResult = fetchTraffic(token: t)
-        async let deviceList = fetchDevices(token: t)
-        async let wanResult = fetchWAN(token: t)
-        async let wan6Result = fetchWAN6(token: t)
-        async let wifiResult = fetchWifi(token: t)
-        async let cpuResult = fetchSystemInfo(token: t)
-        async let cpuUsage = fetchCpuUsage(token: t)
-        async let battCurrentResult = fetchBatteryCurrent(token: t)
-        async let simResult = fetchSimStatus(token: t)
-        async let modemResult = fetchModemStatus(token: t)
-        async let mobileDataResult = fetchMobileDataStatus(token: t)
+        async let batteryResult = fetchBattery()
+        async let chargerResult = fetchCharger()
+        async let thermalResult = fetchThermal()
+        async let trafficResult = fetchTraffic()
+        async let deviceList = fetchDevices()
+        async let wanResult = fetchWAN()
+        async let wan6Result = fetchWAN6()
+        async let wifiResult = fetchWifi()
+        async let cpuResult = fetchSystemInfo()
+        async let cpuUsage = fetchCpuUsage()
+        async let battCurrentResult = fetchBatteryCurrent()
+        async let simResult = fetchSimStatus()
+        async let modemResult = fetchModemStatus()
+        async let mobileDataResult = fetchMobileDataStatus()
 
         let (bat, charger, therm, traffic, devices, wan, wan6, wifi, cpu, cpuUse, battCurrent, sim, modemStatus, mobileDataOff) = await (
             batteryResult, chargerResult, thermalResult, trafficResult,
@@ -165,7 +139,6 @@ final class DashboardViewModel {
                 cpu.cpuUsagePercent = usage
                 cpu.cpuUsageIsEstimate = false
             }
-            cpu.cpuCores = cachedCpuCores
             if cpu != systemInfo { systemInfo = cpu }
         }
         if let (pin, puk) = sim {
@@ -176,31 +149,13 @@ final class DashboardViewModel {
             withAnimation(.easeInOut) { isMobileDataOff = dataOff }
         }
 
-        // Track companion plugin health: if cpu_usage returned data, plugin is alive
-        if cpuUse != nil {
-            companionConsecutiveFailures = 0
-            if companionUnavailable {
-                withAnimation(.easeInOut) { companionUnavailable = false }
-            }
-        } else if cpuFileReadCooldown > 0 || cpuFileReadFailCount >= Self.maxCpuFileReadFails {
-            // Only count as companion failure when cooldown is active (sustained failure, not first-sample nil)
-            companionConsecutiveFailures += 1
-            if companionConsecutiveFailures >= Self.companionUnavailableThreshold && !companionUnavailable {
-                withAnimation(.easeInOut) { companionUnavailable = true }
-                logger.warning("companion plugin appears unavailable after \(self.companionConsecutiveFailures) consecutive failures")
-            }
-        }
-
         lastUpdated = Date()
         logger.debug("refresh done")
     }
 
-    private func fetchSignal(token: String) async -> (NRSignal, LTESignal, WCDMASignal, OperatorInfo)? {
+    private func fetchSignal() async -> (NRSignal, LTESignal, WCDMASignal, OperatorInfo)? {
         do {
-            let (_, data) = try await client.call(
-                sessionToken: token, object: "zte_nwinfo_api",
-                method: "nwinfo_get_netinfo", params: [:]
-            )
+            let data = try await client.getJSON("/api/network/signal")
             let parsed = SignalParser.parseNetInfo(data)
             return (parsed.0, parsed.1, parsed.2, parsed.3)
         } catch {
@@ -209,195 +164,131 @@ final class DashboardViewModel {
         }
     }
 
-    private func fetchModemStatus(token: String) async -> String? {
+    private func fetchModemStatus() async -> String? {
+        struct ModemStatusResponse: Decodable {
+            let operate_mode: String
+        }
         do {
-            let (_, data) = try await client.call(
-                sessionToken: token, object: "zte-companion",
-                method: "modem_status", params: [:]
-            )
-            return data["operate_mode"] as? String ?? ""
+            let resp: ModemStatusResponse = try await client.get("/api/modem/status")
+            return resp.operate_mode
         } catch {
             return nil
         }
     }
 
-    private func fetchBattery(token: String) async -> BatteryStatus? {
+    private func fetchBattery() async -> BatteryStatus? {
         do {
-            let (_, data) = try await client.call(
-                sessionToken: token, object: "zwrt_bsp.battery",
-                method: "list", params: [:]
-            )
+            let data = try await client.getJSON("/api/device/battery-info")
             return DeviceParser.parseBattery(data)
         } catch { return nil }
     }
 
-    private func fetchCharger(token: String) async -> [String: Any]? {
-        guard let (_, data) = try? await client.call(
-            sessionToken: token, object: "zwrt_bsp.charger",
-            method: "list", params: [:]
-        ) else { return nil }
+    private func fetchCharger() async -> [String: Any]? {
+        guard let data = try? await client.getJSON("/api/device/charger") else { return nil }
         return data
     }
 
-    private func fetchThermal(token: String) async -> ThermalStatus? {
+    private func fetchThermal() async -> ThermalStatus? {
         do {
-            let (_, data) = try await client.call(
-                sessionToken: token, object: "zwrt_bsp.thermal",
-                method: "get_cpu_temp", params: [:]
-            )
+            let data = try await client.getJSON("/api/device/thermal")
             return DeviceParser.parseThermal(data)
         } catch { return nil }
     }
 
-    private func fetchTraffic(token: String) async -> TrafficStats? {
-        // Priority 1: zte-companion.bandwidth (kernel-level /proc/net/dev)
-        if let stats = await fetchCompanionBandwidth(token: token) {
+    private func fetchTraffic() async -> TrafficStats? {
+        // Priority 1: server-computed speed (precise Instant timing on device)
+        if let stats = await fetchAgentSpeed() {
             return stats
         }
-        // Priority 2: zwrt_data get_wwandst (modem pre-computed rates)
-        if let (_, data) = try? await client.call(
-            sessionToken: token, object: "zwrt_data",
-            method: "get_wwandst", params: ["cid": 1, "type": 1]
-        ), let stats = DeviceParser.parseWwandstTraffic(data) {
+        // Priority 2: native /api/network/traffic (kernel-level /proc/net/dev via agent)
+        if let stats = await fetchAgentTraffic() {
             return stats
         }
-        // Priority 3: network.device status (rmnet_data0 delta)
-        if let (_, data) = try? await client.call(
-            sessionToken: token, object: "network.device",
-            method: "status", params: ["name": "rmnet_data0"]
-        ) {
+        // Priority 3: zwrt_data get_wwandst (modem pre-computed rates)
+        if let data = try? await client.getJSON("/api/network/speeds"),
+           let stats = DeviceParser.parseWwandstTraffic(data) {
+            return stats
+        }
+        // Priority 4: network.device status (rmnet_data0 delta)
+        if let data = try? await client.getJSON("/api/network/rmnet") {
             var stats = DeviceParser.parseTraffic(data)
-            stats.source = "rmnet_ubus"
+            stats.source = "rmnet_agent"
             return stats
         }
         return nil
     }
 
-    private func fetchCompanionBandwidth(token: String) async -> TrafficStats? {
-        if companionBwCooldown > 0 {
-            companionBwCooldown -= 1
-            return nil
+    private func fetchAgentSpeed() async -> TrafficStats? {
+        struct AgentSpeedResponse: Decodable {
+            let rx_bytes: UInt64
+            let tx_bytes: UInt64
+            let rx_speed: Double
+            let tx_speed: Double
+            let elapsed_ms: UInt64
         }
         do {
-            let (_, data) = try await client.call(
-                sessionToken: token, object: "zte-companion",
-                method: "bandwidth", params: [:]
+            let resp: AgentSpeedResponse = try await client.get("/api/network/speed")
+            var stats = TrafficStats(
+                rxBytes: resp.rx_bytes,
+                txBytes: resp.tx_bytes,
+                timestamp: Date(),
+                source: "agent_speed"
             )
-            guard let interfaces = data["if"] as? [String: Any],
-                  let rmnet = interfaces["rmnet_data0"] as? [String: Any],
-                  let rx = (rmnet["rx"] as? UInt64) ?? (rmnet["rx"] as? Int).map({ UInt64($0) }),
-                  let tx = (rmnet["tx"] as? UInt64) ?? (rmnet["tx"] as? Int).map({ UInt64($0) }) else {
-                return nil
-            }
-            companionBwFailCount = 0
-            companionBwCooldown = 0
-            return TrafficStats(rxBytes: rx, txBytes: tx, timestamp: Date(), source: "companion")
+            stats.serverRxSpeed = resp.rx_speed
+            stats.serverTxSpeed = resp.tx_speed
+            return stats
         } catch {
             if Self.isCancellation(error) { return nil }
-            companionBwFailCount += 1
-            logger.warning("companion bandwidth error: \(String(describing: error)) (fail \(self.companionBwFailCount)/\(Self.maxCpuFileReadFails))")
-            if companionBwFailCount >= Self.maxCpuFileReadFails {
-                companionBwCooldown = 10
-                logger.warning("companion bandwidth cooldown (retry in ~10 cycles)")
-            }
             return nil
         }
     }
 
-    private func fetchDevices(token: String) async -> [ConnectedDevice]? {
+    private func fetchAgentTraffic() async -> TrafficStats? {
+        struct NetIface: Decodable {
+            let name: String
+            let rx_bytes: UInt64
+            let tx_bytes: UInt64
+        }
         do {
-            let (_, hintsData) = try await client.call(
-                sessionToken: token, object: "luci-rpc",
-                method: "getHostHints", params: [:]
-            )
-            var deviceList = DeviceParser.parseHostHints(hintsData)
+            let ifaces: [NetIface] = try await client.get("/api/network/traffic")
+            guard let rmnet = ifaces.first(where: { $0.name == "rmnet_data0" }) else { return nil }
+            return TrafficStats(rxBytes: rmnet.rx_bytes, txBytes: rmnet.tx_bytes, timestamp: Date(), source: "agent")
+        } catch {
+            if Self.isCancellation(error) { return nil }
+            return nil
+        }
+    }
 
-            // Enrich with DHCP hostnames (optional)
-            if let (_, dhcpData) = try? await client.call(
-                sessionToken: token, object: "luci-rpc",
-                method: "getDHCPLeases", params: ["family": 4]
-            ), let leases = dhcpData["dhcp_leases"] as? [[String: Any]] {
+    private func fetchDevices() async -> [ConnectedDevice]? {
+        do {
+            let data = try await client.getJSON("/api/network/clients")
+            let hostsData = data["hosts"] as? [String: Any] ?? [:]
+            var deviceList = DeviceParser.parseHostHints(hostsData)
+            if let leases = data["dhcp_leases"] as? [[String: Any]] {
                 DeviceParser.enrichWithDHCP(devices: &deviceList, leases: leases)
             }
-
             return deviceList
         } catch { return nil }
     }
 
-    private func fetchWAN(token: String) async -> String? {
-        guard let (_, data) = try? await client.call(
-            sessionToken: token, object: "network.interface.zte_wan",
-            method: "status", params: [:]
-        ) else { return nil }
+    private func fetchWAN() async -> String? {
+        guard let data = try? await client.getJSON("/api/network/wan") else { return nil }
         let ip = DeviceParser.parseWanIPv4(data)
         return ip.isEmpty ? nil : ip
     }
 
-    private func fetchWAN6(token: String) async -> String? {
-        guard let (_, data) = try? await client.call(
-            sessionToken: token, object: "network.interface.zte_wan6",
-            method: "status", params: [:]
-        ) else { return nil }
+    private func fetchWAN6() async -> String? {
+        guard let data = try? await client.getJSON("/api/network/wan6") else { return nil }
         let ip = DeviceParser.parseWanIPv6(data)
         return ip.isEmpty ? nil : ip
     }
 
-    private func fetchWifi(token: String) async -> WifiStatus? {
-        // Try companion wifi_status first (single call replaces 7 calls)
-        if let (_, data) = try? await client.call(
-            sessionToken: token, object: "zte-companion",
-            method: "wifi_status", params: [:]
-        ), data["error"] == nil, data["htmode_2g"] != nil {
+    private func fetchWifi() async -> WifiStatus? {
+        if let data = try? await client.getJSON("/api/wifi/status"),
+           data["htmode_2g"] != nil {
             return parseCompanionWifi(data)
         }
-
-        // Fallback to zwrt_wlan multi-call approach
-        guard let (_, statusData) = try? await client.call(
-            sessionToken: token, object: "zwrt_wlan",
-            method: "report", params: [:]
-        ) else { return nil }
-        var wifi = DeviceParser.parseWifiStatus(statusData)
-
-        async let chanCall = client.call(
-            sessionToken: token, object: "zwrt_wlan",
-            method: "get_current_channel", params: [:]
-        )
-        async let ifaceCall = client.call(
-            sessionToken: token, object: "zwrt_wlan",
-            method: "iface_report", params: [:]
-        )
-        async let tx2gCall = client.call(
-            sessionToken: token, object: "zwrt_wlan",
-            method: "wlan_uci_get_section", params: ["section": "wifi0"]
-        )
-        async let tx5gCall = client.call(
-            sessionToken: token, object: "zwrt_wlan",
-            method: "wlan_uci_get_section", params: ["section": "wifi1"]
-        )
-        async let mbbCall = client.call(
-            sessionToken: token, object: "zwrt_wlan",
-            method: "wlan_uci_get_section", params: ["section": "zte_mbb"]
-        )
-        async let assocCall = client.call(
-            sessionToken: token, object: "zwrt_wlan",
-            method: "get_assoc_info", params: [:]
-        )
-
-        let chan = try? await chanCall
-        let iface = try? await ifaceCall
-        let tx2g = try? await tx2gCall
-        let tx5g = try? await tx5gCall
-        let mbb = try? await mbbCall
-        let assoc = try? await assocCall
-
-        if let (_, d) = chan { DeviceParser.parseWifiChannels(d, into: &wifi) }
-        if let (_, d) = iface { DeviceParser.parseWifiInterfaces(d, into: &wifi) }
-        if let (_, d) = tx2g { DeviceParser.parseWifiTxPower(d, band: "2g", into: &wifi) }
-        if let (_, d) = tx5g { DeviceParser.parseWifiTxPower(d, band: "5g", into: &wifi) }
-        if let (_, d) = mbb { DeviceParser.parseWifi6(d, into: &wifi) }
-        if let (_, d) = assoc { DeviceParser.parseWifiClients(d, into: &wifi) }
-
-        return wifi
+        return nil
     }
 
     private func parseCompanionWifi(_ data: [String: Any]) -> WifiStatus {
@@ -415,6 +306,9 @@ final class DashboardViewModel {
         } else {
             clientsTotal = 0
         }
+        let guestDisabled2g = (data["guest_disabled_2g"] as? String) == "1"
+        let guestDisabled5g = (data["guest_disabled_5g"] as? String) == "1"
+        let guestEnabled = !guestDisabled2g || !guestDisabled5g
         return WifiStatus(
             wifiOn: (data["wifi_onoff"] as? String) == "1",
             ssid2g: data["ssid_2g"] as? String ?? "",
@@ -432,119 +326,55 @@ final class DashboardViewModel {
             bandwidth2g: data["htmode_2g"] as? String ?? "",
             bandwidth5g: data["htmode_5g"] as? String ?? "",
             clientsTotal: clientsTotal,
-            wifi6: (data["wifi6_switch"] as? String) == "1"
+            wifi6: (data["wifi6_switch"] as? String) == "1",
+            guestEnabled: guestEnabled,
+            guestSsid: data["guest_ssid"] as? String ?? ""
         )
     }
 
-    private func fetchSystemInfo(token: String) async -> SystemInfo? {
-        guard let (_, data) = try? await client.call(
-            sessionToken: token, object: "system",
-            method: "info", params: [:]
-        ) else { return nil }
-        return DeviceParser.parseSystemInfo(data, cpuCores: cachedCpuCores)
+    private func fetchSystemInfo() async -> SystemInfo? {
+        guard let data = try? await client.getJSON("/api/device/system") else { return nil }
+        return DeviceParser.parseSystemInfo(data, cpuCores: 4)
     }
 
-    private func fetchBatteryCurrent(token: String) async -> (current: Int?, voltage: Int?) {
-        if battCurrentFileReadCooldown > 0 {
-            battCurrentFileReadCooldown -= 1
-            return (nil, nil)
+    private func fetchBatteryCurrent() async -> (current: Int?, voltage: Int?) {
+        struct BatteryInfo: Decodable {
+            let current_ua: Int
+            let voltage_uv: Int
         }
         do {
-            let (_, data) = try await client.call(
-                sessionToken: token, object: "zte-companion",
-                method: "battery_current", params: [:]
-            )
-            guard let microamps = data["current_now"] as? Int else {
-                logger.debug("battery current_now: missing or unparseable data")
-                return (nil, nil)
-            }
-            battCurrentFileReadFailCount = 0
-            battCurrentFileReadCooldown = 0
-            let voltageMV: Int? = (data["voltage_now"] as? Int).map { $0 / 1000 }
-            return (microamps / 1000, voltageMV)
-        } catch let error as UbusError {
-            if Self.isCancellation(error) { return (nil, nil) }
-            battCurrentFileReadFailCount += 1
-            logger.warning("battery current_now error: \(String(describing: error)) (fail \(self.battCurrentFileReadFailCount)/\(Self.maxCpuFileReadFails))")
-            if case .requestFailed = error, battCurrentFileReadFailCount >= Self.maxCpuFileReadFails {
-                battCurrentFileReadCooldown = 10
-                logger.warning("battery current_now cooldown after \(Self.maxCpuFileReadFails) consecutive failures (retry in ~10 cycles)")
-            }
-            return (nil, nil)
+            let info: BatteryInfo = try await client.get("/api/battery")
+            return (info.current_ua / 1000, info.voltage_uv / 1000)
         } catch {
             if Self.isCancellation(error) { return (nil, nil) }
-            battCurrentFileReadFailCount += 1
-            logger.warning("battery current_now unexpected error: \(String(describing: error))")
             return (nil, nil)
         }
     }
 
-    private func fetchCpuUsage(token: String) async -> Double? {
-        if cpuFileReadCooldown > 0 {
-            cpuFileReadCooldown -= 1
-            return nil
+    private func fetchCpuUsage() async -> Double? {
+        struct CpuUsage: Decodable {
+            let cores: [Double]
+            let overall: Double
         }
         do {
-            let (_, data) = try await client.call(
-                sessionToken: token, object: "zte-companion",
-                method: "cpu_usage", params: [:]
-            )
-            // Response: {idle: <u64>, total: <u64>, cores: <int>}
-            // Handle Swift JSON number coercion: values may arrive as Int or UInt64
-            guard let idle = (data["idle"] as? UInt64) ?? (data["idle"] as? Int).map({ UInt64($0) }),
-                  let total = (data["total"] as? UInt64) ?? (data["total"] as? Int).map({ UInt64($0) }) else {
-                logger.debug("cpu_usage: missing or unparseable idle/total")
-                return nil
-            }
-            if let cores = (data["cores"] as? Int) ?? (data["cores"] as? UInt64).map({ Int($0) }) {
-                cachedCpuCores = cores
-            }
-            let sample = CpuStatSample(idle: idle, total: total)
-            cpuFileReadFailCount = 0
-            cpuFileReadCooldown = 0
-            defer { prevCpuSample = sample }
-            guard let prev = prevCpuSample else {
-                logger.debug("cpu_usage: first sample collected (\(self.cachedCpuCores) cores)")
-                return nil
-            }
-            let usage = DeviceParser.computeCpuUsage(previous: prev, current: sample)
-            logger.debug("cpu_usage: usage=\(usage.map { String(format: "%.1f%%", $0) } ?? "nil")")
-            return usage
-        } catch let error as UbusError {
-            if Self.isCancellation(error) { return nil }
-            cpuFileReadFailCount += 1
-            logger.warning("cpu_usage error: \(String(describing: error)) (fail \(self.cpuFileReadFailCount)/\(Self.maxCpuFileReadFails))")
-            if case .requestFailed = error, cpuFileReadFailCount >= Self.maxCpuFileReadFails {
-                cpuFileReadCooldown = 10
-                logger.warning("cpu_usage cooldown after \(Self.maxCpuFileReadFails) consecutive failures (retry in ~10 cycles)")
-            }
-            return nil
+            let usage: CpuUsage = try await client.get("/api/cpu")
+            return usage.overall
         } catch {
             if Self.isCancellation(error) { return nil }
-            cpuFileReadFailCount += 1
-            logger.warning("cpu_usage unexpected error: \(String(describing: error))")
             return nil
         }
     }
 
-    private func fetchMobileDataStatus(token: String) async -> Bool? {
-        guard let (_, data) = try? await client.call(
-            sessionToken: token, object: "zwrt_data",
-            method: "get_wwaniface", params: ["cid": 1]
-        ) else { return nil }
+    private func fetchMobileDataStatus() async -> Bool? {
+        guard let data = try? await client.getJSON("/api/modem/data") else { return nil }
         let wwan = MobileNetworkParser.parseWWAN(data)
         let connected = wwan.connectStatus.contains("connected")
         return wwan.dataEnabled == 0 && !connected
     }
 
-    private func fetchSimStatus(token: String) async -> (pin: Bool, puk: Bool)? {
-        if simInfoCooldown > 0 { simInfoCooldown -= 1; return nil }
+    private func fetchSimStatus() async -> (pin: Bool, puk: Bool)? {
         do {
-            let (_, data) = try await client.call(
-                sessionToken: token, object: "zwrt_zte_mdm.api",
-                method: "get_sim_info", params: [:]
-            )
-            simInfoFailCount = 0
+            let data = try await client.getJSON("/api/sim/info")
             let sim = (data["sim_states"] as? String ?? "").lowercased()
             let modem = (data["modem_main_state"] as? String ?? "").lowercased()
             return (
@@ -553,10 +383,6 @@ final class DashboardViewModel {
             )
         } catch {
             if Self.isCancellation(error) { return nil }
-            simInfoFailCount += 1
-            if simInfoFailCount >= Self.maxCpuFileReadFails {
-                simInfoCooldown = 15
-            }
             return nil
         }
     }

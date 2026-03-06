@@ -15,12 +15,12 @@ final class SignalMonitorViewModel {
     var lastUpdated: Date?
     var error: String?
 
-    private let client: UbusClient
+    private let client: AgentClient
     private let authManager: AuthManager
     private var pollTask: Task<Void, Never>?
     private let maxHistoryPoints = 60
 
-    init(client: UbusClient, authManager: AuthManager) {
+    init(client: AgentClient, authManager: AuthManager) {
         self.client = client
         self.authManager = authManager
     }
@@ -42,14 +42,10 @@ final class SignalMonitorViewModel {
 
     func refresh() async {
         logger.debug("refresh start")
-        let token = authManager.sessionToken
         error = nil
 
         do {
-            let (_, data) = try await client.call(
-                sessionToken: token, object: "zte_nwinfo_api",
-                method: "nwinfo_get_netinfo", params: [:]
-            )
+            let data = try await client.getJSON("/api/network/signal")
             let (nr, lte, wcdma, op) = SignalParser.parseNetInfo(data)
             if nr != nrSignal { nrSignal = nr }
             if lte != lteSignal { lteSignal = lte }

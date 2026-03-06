@@ -10,6 +10,7 @@ struct BandLockView: View {
                     Text(msg)
                         .font(.subheadline)
                         .foregroundStyle(viewModel.messageIsError ? .red : .green)
+                        .textSelection(.enabled)
                 }
             }
 

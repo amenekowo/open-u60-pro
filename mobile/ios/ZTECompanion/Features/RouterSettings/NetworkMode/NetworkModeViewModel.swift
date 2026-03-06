@@ -10,10 +10,10 @@ final class NetworkModeViewModel {
 
     var selectedNetSelect: String = NetworkModeConfig.netSelectOptions[0].value
 
-    private let client: UbusClient
+    private let client: AgentClient
     private let authManager: AuthManager
 
-    init(client: UbusClient, authManager: AuthManager) {
+    init(client: AgentClient, authManager: AuthManager) {
         self.client = client
         self.authManager = authManager
     }
@@ -21,15 +21,9 @@ final class NetworkModeViewModel {
     func refresh() async {
         isLoading = true
         message = nil
-        let token = authManager.sessionToken
 
         do {
-            let (_, data) = try await client.call(
-                sessionToken: token,
-                object: "zte_nwinfo_api",
-                method: "nwinfo_get_netinfo",
-                params: [:]
-            )
+            let data = try await client.getJSON("/api/network/signal")
             config = NetworkModeParser.parse(data)
             selectedNetSelect = config.netSelect
         } catch {
@@ -41,27 +35,16 @@ final class NetworkModeViewModel {
 
     func applyMode() async {
         isLoading = true
-        let token = authManager.sessionToken
 
         do {
             if selectedNetSelect != config.netSelect {
-                let (_, _) = try await client.call(
-                    sessionToken: token,
-                    object: "zte_nwinfo_api",
-                    method: "nwinfo_set_netselect",
-                    params: ["net_select": selectedNetSelect]
-                )
+                let _ = try await client.putJSON("/api/modem/network-mode", body: ["net_select": selectedNetSelect])
             }
             // Poll until the router confirms the new value (up to ~10s)
             let expectedNet = selectedNetSelect
             for _ in 0..<5 {
                 try? await Task.sleep(for: .seconds(2))
-                let (_, data) = try await client.call(
-                    sessionToken: token,
-                    object: "zte_nwinfo_api",
-                    method: "nwinfo_get_netinfo",
-                    params: [:]
-                )
+                let data = try await client.getJSON("/api/network/signal")
                 let fetched = NetworkModeParser.parse(data)
                 if fetched.netSelect == expectedNet {
                     config = fetched
@@ -71,7 +54,6 @@ final class NetworkModeViewModel {
                 }
             }
 
-            // Timeout — keep optimistic update, warn the user
             config = NetworkModeConfig(netSelect: expectedNet)
             showMessage("Mode sent — router may still be switching", isError: false)
         } catch {

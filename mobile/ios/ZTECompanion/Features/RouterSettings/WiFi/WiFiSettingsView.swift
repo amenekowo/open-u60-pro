@@ -10,6 +10,7 @@ struct WiFiSettingsView: View {
                     Text(msg)
                         .font(.subheadline)
                         .foregroundStyle(viewModel.messageIsError ? .red : .green)
+                        .textSelection(.enabled)
                 }
             }
 

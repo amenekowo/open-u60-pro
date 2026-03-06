@@ -12,12 +12,12 @@ final class USBConnectionViewModel {
     var message: String?
     var messageIsError: Bool = false
 
-    private let client: UbusClient
+    private let client: AgentClient
     private let authManager: AuthManager
     private var pollTask: Task<Void, Never>?
     private var wasCableAttached: Bool = false
 
-    init(client: UbusClient, authManager: AuthManager) {
+    init(client: AgentClient, authManager: AuthManager) {
         self.client = client
         self.authManager = authManager
     }
@@ -38,18 +38,15 @@ final class USBConnectionViewModel {
     }
 
     func refresh() async {
-        var token = authManager.sessionToken
-
-        var usbData = await fetchUSB(token: token)
+        var usbData = await fetchUSB()
 
         if usbData == nil, await authManager.reauthenticate() {
-            token = authManager.sessionToken
-            usbData = await fetchUSB(token: token)
+            usbData = await fetchUSB()
         }
 
         guard let usb = usbData else { return }
 
-        let charger = await fetchCharger(token: token)
+        let charger = await fetchCharger()
         let status = DeviceParser.parseUSBStatus(usb, chargerData: charger)
 
         if status.cableAttached && !wasCableAttached {
@@ -63,14 +60,8 @@ final class USBConnectionViewModel {
     func enablePowerbank() async {
         isLoading = true
         message = nil
-        let token = authManager.sessionToken
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_bsp.powerbank",
-                method: "set",
-                params: ["state": 1]
-            )
+            let _ = try await client.putJSON("/api/usb/powerbank", body: ["state": 1])
             usbStatus.powerbankActive = true
             message = "Fast charging enabled"
             messageIsError = false
@@ -84,14 +75,8 @@ final class USBConnectionViewModel {
     func disablePowerbank() async {
         isLoading = true
         message = nil
-        let token = authManager.sessionToken
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_bsp.powerbank",
-                method: "set",
-                params: ["state": 0]
-            )
+            let _ = try await client.putJSON("/api/usb/powerbank", body: ["state": 0])
             usbStatus.powerbankActive = false
             message = "Fast charging disabled"
             messageIsError = false
@@ -102,23 +87,11 @@ final class USBConnectionViewModel {
         isLoading = false
     }
 
-    private func fetchUSB(token: String) async -> [String: Any]? {
-        guard let (_, data) = try? await client.call(
-            sessionToken: token,
-            object: "zwrt_bsp.usb",
-            method: "list",
-            params: [:]
-        ) else { return nil }
-        return data
+    private func fetchUSB() async -> [String: Any]? {
+        try? await client.getJSON("/api/usb/status")
     }
 
-    private func fetchCharger(token: String) async -> [String: Any]? {
-        guard let (_, data) = try? await client.call(
-            sessionToken: token,
-            object: "zwrt_bsp.charger",
-            method: "list",
-            params: [:]
-        ) else { return nil }
-        return data
+    private func fetchCharger() async -> [String: Any]? {
+        try? await client.getJSON("/api/device/charger")
     }
 }

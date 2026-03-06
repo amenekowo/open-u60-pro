@@ -8,11 +8,11 @@ final class SignalDetectViewModel {
     var message: String?
     var messageIsError: Bool = false
 
-    private let client: UbusClient
+    private let client: AgentClient
     private let authManager: AuthManager
     private var pollTask: Task<Void, Never>?
 
-    init(client: UbusClient, authManager: AuthManager) {
+    init(client: AgentClient, authManager: AuthManager) {
         self.client = client
         self.authManager = authManager
     }
@@ -21,15 +21,9 @@ final class SignalDetectViewModel {
         isLoading = true
         message = nil
         status.results = []
-        let token = authManager.sessionToken
 
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zte_nwinfo_api",
-                method: "nwinfo_start_detect_signal_quality",
-                params: [:]
-            )
+            let _ = try await client.postJSON("/api/cell/signal-detect/start")
             status.running = true
             showMessage("Detection started", isError: false)
             startPolling()
@@ -42,15 +36,9 @@ final class SignalDetectViewModel {
 
     func stopDetection() async {
         stopPolling()
-        let token = authManager.sessionToken
 
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zte_nwinfo_api",
-                method: "nwinfo_end_detect_signal_quality",
-                params: [:]
-            )
+            let _ = try await client.postJSON("/api/cell/signal-detect/stop")
             status.running = false
             showMessage("Detection stopped", isError: false)
             await fetchResults()
@@ -60,15 +48,8 @@ final class SignalDetectViewModel {
     }
 
     func fetchResults() async {
-        let token = authManager.sessionToken
-
         do {
-            let (_, data) = try await client.call(
-                sessionToken: token,
-                object: "zte_nwinfo_api",
-                method: "nwinfo_get_detect_quality_recorder",
-                params: [:]
-            )
+            let data = try await client.getJSON("/api/cell/signal-detect/results")
             status.results = SignalDetectParser.parseResults(data)
         } catch {
             // Results may not be available yet
@@ -92,15 +73,8 @@ final class SignalDetectViewModel {
     }
 
     private func pollProgress() async {
-        let token = authManager.sessionToken
-
         do {
-            let (_, data) = try await client.call(
-                sessionToken: token,
-                object: "zte_nwinfo_api",
-                method: "nwinfo_get_progress_and_quality",
-                params: [:]
-            )
+            let data = try await client.getJSON("/api/cell/signal-detect/progress")
             let progressStatus = SignalDetectParser.parseProgress(data)
             status.progress = progressStatus.progress
             if progressStatus.progress >= 100 {

@@ -29,10 +29,10 @@ final class SIMViewModel {
     var pukInput: String = ""
     var nckInput: String = ""
 
-    private let client: UbusClient
+    private let client: AgentClient
     private let authManager: AuthManager
 
-    init(client: UbusClient, authManager: AuthManager) {
+    init(client: AgentClient, authManager: AuthManager) {
         self.client = client
         self.authManager = authManager
     }
@@ -69,10 +69,9 @@ final class SIMViewModel {
     func refresh() async {
         isLoading = true
         message = nil
-        let token = authManager.sessionToken
 
-        async let simTask = fetchSIMInfo(token: token)
-        async let lockTask = fetchSIMLock(token: token)
+        async let simTask = fetchSIMInfo()
+        async let lockTask = fetchSIMLock()
 
         let (sim, lock) = await (simTask, lockTask)
         if let sim { simInfo = sim }
@@ -83,19 +82,13 @@ final class SIMViewModel {
 
     func changePinMode(enable: Bool) async {
         isLoading = true
-        let token = authManager.sessionToken
 
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_zte_mdm.api",
-                method: "sim_change_pin_mode",
-                params: [
+            let _ = try await client.postJSON("/api/sim/pin/mode", body: [
                     "pin_num_m": pinInput,
                     "pin_mode": enable ? 1 : 0,
                     "pin_encode_flag": "0"
-                ]
-            )
+                ])
             pinInput = ""
             showMessage("PIN lock \(enable ? "enabled" : "disabled")", isError: false)
             await refresh()
@@ -113,19 +106,13 @@ final class SIMViewModel {
         }
 
         isLoading = true
-        let token = authManager.sessionToken
 
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_zte_mdm.api",
-                method: "sim_change_pin",
-                params: [
+            let _ = try await client.postJSON("/api/sim/pin/change", body: [
                     "pin_num": oldPinInput,
                     "new_pin_num": newPinInput,
                     "pin_encode_flag": "0"
-                ]
-            )
+                ])
             oldPinInput = ""
             newPinInput = ""
             showChangePinSheet = false
@@ -144,19 +131,13 @@ final class SIMViewModel {
         }
 
         isLoading = true
-        let token = authManager.sessionToken
 
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_zte_mdm.api",
-                method: "sim_verify_pin_puk",
-                params: [
+            let _ = try await client.postJSON("/api/sim/pin/verify", body: [
                     "pin_num": pinInput,
                     "puk_num": "",
                     "pin_encode_flag": "0"
-                ]
-            )
+                ])
             pinInput = ""
             showEnterPinSheet = false
             showMessage("PIN verified", isError: false)
@@ -179,19 +160,13 @@ final class SIMViewModel {
         }
 
         isLoading = true
-        let token = authManager.sessionToken
 
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_zte_mdm.api",
-                method: "sim_verify_pin_puk",
-                params: [
+            let _ = try await client.postJSON("/api/sim/pin/verify", body: [
                     "pin_num": newPinInput,
                     "puk_num": pukInput,
                     "pin_encode_flag": "0"
-                ]
-            )
+                ])
             pukInput = ""
             newPinInput = ""
             showEnterPukSheet = false
@@ -211,15 +186,9 @@ final class SIMViewModel {
         }
 
         isLoading = true
-        let token = authManager.sessionToken
 
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_zte_mdm.api",
-                method: "set_simlock_nck",
-                params: ["nck": nckInput]
-            )
+            let _ = try await client.postJSON("/api/sim/unlock", body: ["nck": nckInput])
             nckInput = ""
             showUnlockSheet = false
             showMessage("SIM unlocked successfully", isError: false)
@@ -233,14 +202,9 @@ final class SIMViewModel {
 
     // MARK: - Private
 
-    private func fetchSIMInfo(token: String) async -> SIMInfo? {
+    private func fetchSIMInfo() async -> SIMInfo? {
         do {
-            let (_, data) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_zte_mdm.api",
-                method: "get_sim_info",
-                params: [:]
-            )
+            let data = try await client.getJSON("/api/sim/info")
             return SIMParser.parseSIMInfo(data)
         } catch {
             showMessage("Failed to load SIM info: \(error.localizedDescription)", isError: true)
@@ -248,14 +212,9 @@ final class SIMViewModel {
         }
     }
 
-    private func fetchSIMLock(token: String) async -> SIMLockInfo? {
+    private func fetchSIMLock() async -> SIMLockInfo? {
         do {
-            let (_, data) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_zte_mdm.api",
-                method: "get_simlock_available_trials",
-                params: [:]
-            )
+            let data = try await client.getJSON("/api/sim/lock-trials")
             return SIMParser.parseSIMLock(data)
         } catch {
             return nil

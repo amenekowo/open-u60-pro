@@ -12,10 +12,10 @@ final class VPNPassthroughViewModel {
     var editPptp: Bool = false
     var editIpsec: Bool = false
 
-    private let client: UbusClient
+    private let client: AgentClient
     private let authManager: AuthManager
 
-    init(client: UbusClient, authManager: AuthManager) {
+    init(client: AgentClient, authManager: AuthManager) {
         self.client = client
         self.authManager = authManager
     }
@@ -23,15 +23,9 @@ final class VPNPassthroughViewModel {
     func refresh() async {
         isLoading = true
         message = nil
-        let token = authManager.sessionToken
 
         do {
-            let (_, data) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_router.api",
-                method: "router_get_vpn_passthrough",
-                params: [:]
-            )
+            let data = try await client.getJSON("/api/router/vpn")
             config = VPNPassthroughParser.parse(data)
             editL2tp = config.l2tp
             editPptp = config.pptp
@@ -45,19 +39,13 @@ final class VPNPassthroughViewModel {
 
     func apply() async {
         isLoading = true
-        let token = authManager.sessionToken
 
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_router.api",
-                method: "router_set_vpn_passthrough",
-                params: [
-                    "l2tp_passthrough": editL2tp ? "1" : "0",
-                    "pptp_passthrough": editPptp ? "1" : "0",
-                    "ipsec_passthrough": editIpsec ? "1" : "0"
-                ]
-            )
+            let _ = try await client.putJSON("/api/router/vpn", body: [
+                "l2tp_passthrough": editL2tp ? "1" : "0",
+                "pptp_passthrough": editPptp ? "1" : "0",
+                "ipsec_passthrough": editIpsec ? "1" : "0"
+            ])
             showMessage("VPN passthrough updated", isError: false)
             config = VPNPassthroughConfig(l2tp: editL2tp, pptp: editPptp, ipsec: editIpsec)
         } catch {

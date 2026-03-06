@@ -3,7 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @State private var viewModel: SettingsViewModel
 
-    init(client: UbusClient) {
+    init(client: AgentClient) {
         _viewModel = State(initialValue: SettingsViewModel(client: client))
     }
 
@@ -66,7 +66,7 @@ struct SettingsView: View {
                 Section("About") {
                     LabeledContent("App", value: "ZTE Companion")
                     LabeledContent("Device", value: "ZTE U60 Pro (MU5250)")
-                    LabeledContent("API", value: "ubus JSON-RPC 2.0")
+                    LabeledContent("API", value: "zte-agent REST")
                 }
             }
             .navigationTitle("Settings")

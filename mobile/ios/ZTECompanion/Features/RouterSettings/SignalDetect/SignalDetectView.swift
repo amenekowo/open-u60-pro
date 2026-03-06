@@ -10,6 +10,7 @@ struct SignalDetectView: View {
                     Text(msg)
                         .font(.subheadline)
                         .foregroundStyle(viewModel.messageIsError ? .red : .green)
+                        .textSelection(.enabled)
                 }
             }
 
@@ -35,6 +36,7 @@ struct SignalDetectView: View {
             }
 
             if !viewModel.status.results.isEmpty {
+
                 Section("Results") {
                     ForEach(viewModel.status.results) { result in
                         VStack(alignment: .leading, spacing: 4) {

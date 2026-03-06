@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct EnableADBView: View {
-    let client: UbusClient
+    let client: AgentClient
     let authManager: AuthManager
 
     @State private var isLoading = false
@@ -61,12 +61,7 @@ struct EnableADBView: View {
         isLoading = true
         resultMessage = nil
         do {
-            let (_, _) = try await client.call(
-                sessionToken: authManager.sessionToken,
-                object: "zwrt_bsp.usb",
-                method: "set",
-                params: ["mode": "debug"]
-            )
+            let _ = try await client.putJSON("/api/usb/mode", body: ["mode": "debug"])
             resultMessage = "ADB debug mode enabled. Connect USB-C cable to access the device."
             isError = false
         } catch {

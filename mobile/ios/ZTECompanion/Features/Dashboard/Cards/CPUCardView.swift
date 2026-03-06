@@ -34,3 +34,58 @@ struct CPUCardView: View {
         }
     }
 }
+
+struct CPUDetailSheet: View {
+    let systemInfo: SystemInfo
+    let thermal: ThermalStatus
+
+    var body: some View {
+        NavigationStack {
+            List {
+                row("CPU Usage", icon: "cpu", value: systemInfo.cpuUsagePercent > 0 ? String(format: "%.0f%%", systemInfo.cpuUsagePercent) : "—")
+                if systemInfo.cpuUsagePercent > 0 && systemInfo.cpuUsageIsEstimate {
+                    row("Usage Source", icon: "info.circle", value: "Estimated")
+                }
+                row("CPU Cores", icon: "square.grid.2x2", value: "\(systemInfo.cpuCores)")
+                row("Temperature", icon: "thermometer.medium", value: String(format: "%.1f \u{00B0}C", thermal.cpuTemp))
+                row("Uptime", icon: "clock", value: formatUptime(systemInfo.uptime))
+                row("Memory Total", icon: "memorychip", value: formatBytes(systemInfo.memTotal))
+                row("Memory Free", icon: "memorychip", value: formatBytes(systemInfo.memFree))
+                if systemInfo.memTotal > 0 {
+                    let used = Double(systemInfo.memTotal - systemInfo.memFree) / Double(systemInfo.memTotal) * 100
+                    row("Memory Used", icon: "chart.bar", value: String(format: "%.0f%%", used))
+                }
+            }
+            .navigationTitle("CPU & Memory")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    private func row(_ label: String, icon: String, value: String) -> some View {
+        HStack {
+            Label(label, systemImage: icon)
+            Spacer()
+            Text(value)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+    }
+
+    private func formatUptime(_ seconds: Int) -> String {
+        let d = seconds / 86400
+        let h = (seconds % 86400) / 3600
+        let m = (seconds % 3600) / 60
+        if d > 0 { return "\(d)d \(h)h \(m)m" }
+        if h > 0 { return "\(h)h \(m)m" }
+        return "\(m)m"
+    }
+
+    private func formatBytes(_ bytes: UInt64) -> String {
+        if bytes >= 1_073_741_824 {
+            return String(format: "%.1f GB", Double(bytes) / 1_073_741_824)
+        } else if bytes >= 1_048_576 {
+            return String(format: "%.0f MB", Double(bytes) / 1_048_576)
+        }
+        return "\(bytes) B"
+    }
+}

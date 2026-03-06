@@ -12,10 +12,10 @@ final class ScheduleRebootViewModel {
     var editTime: Date = Calendar.current.date(from: DateComponents(hour: 3, minute: 0)) ?? Date()
     var editDays: Set<String> = []
 
-    private let client: UbusClient
+    private let client: AgentClient
     private let authManager: AuthManager
 
-    init(client: UbusClient, authManager: AuthManager) {
+    init(client: AgentClient, authManager: AuthManager) {
         self.client = client
         self.authManager = authManager
     }
@@ -23,15 +23,9 @@ final class ScheduleRebootViewModel {
     func refresh() async {
         isLoading = true
         message = nil
-        let token = authManager.sessionToken
 
         do {
-            let (_, data) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_bsp.power",
-                method: "get_auto_reboot",
-                params: [:]
-            )
+            let data = try await client.getJSON("/api/modem/schedule-reboot")
             config = ScheduleRebootParser.parse(data)
             editEnabled = config.enabled
             editTime = parseTime(config.time)
@@ -45,7 +39,6 @@ final class ScheduleRebootViewModel {
 
     func apply() async {
         isLoading = true
-        let token = authManager.sessionToken
 
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
@@ -53,16 +46,11 @@ final class ScheduleRebootViewModel {
         let daysStr = editDays.sorted().joined(separator: ",")
 
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zwrt_bsp.power",
-                method: "set_auto_reboot",
-                params: [
-                    "auto_reboot_enable": editEnabled ? "1" : "0",
-                    "auto_reboot_time": timeStr,
-                    "auto_reboot_days": daysStr
-                ]
-            )
+            let _ = try await client.putJSON("/api/modem/schedule-reboot", body: [
+                "auto_reboot_enable": editEnabled ? "1" : "0",
+                "auto_reboot_time": timeStr,
+                "auto_reboot_days": daysStr
+            ])
             showMessage("Schedule updated", isError: false)
             config = ScheduleRebootConfig(enabled: editEnabled, time: timeStr, days: daysStr)
         } catch {

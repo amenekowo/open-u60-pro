@@ -10,46 +10,58 @@ struct DNSSettingsView: View {
                     Text(msg)
                         .font(.subheadline)
                         .foregroundStyle(viewModel.messageIsError ? .red : .green)
+                        .textSelection(.enabled)
                 }
             }
 
-            Section("Current DNS") {
-                LabeledContent("Mode", value: viewModel.config.wanDnsMode.isEmpty ? "—" : viewModel.config.wanDnsMode)
-                if viewModel.config.isManual {
-                    LabeledContent("Primary", value: viewModel.config.primaryDns)
-                    LabeledContent("Secondary", value: viewModel.config.secondaryDns)
-                }
-            }
+            // MARK: - DNS Mode
 
-            if !viewModel.config.ipv6DnsMode.isEmpty {
-                Section("IPv6 DNS") {
-                    LabeledContent("Mode", value: viewModel.config.ipv6DnsMode)
-                    if !viewModel.config.ipv6PrimaryDns.isEmpty {
-                        LabeledContent("Primary", value: viewModel.config.ipv6PrimaryDns)
-                    }
-                    if !viewModel.config.ipv6SecondaryDns.isEmpty {
-                        LabeledContent("Secondary", value: viewModel.config.ipv6SecondaryDns)
+            Section {
+                Picker("Mode", selection: $viewModel.selectedMode) {
+                    ForEach(DNSMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
                     }
                 }
+                .pickerStyle(.segmented)
+            } header: {
+                Text("DNS Mode")
+            } footer: {
+                Text(modeFooter)
             }
 
-            Section("Configure") {
-                Toggle("Manual DNS", isOn: $viewModel.editMode)
+            // MARK: - DNS Servers
 
-                if viewModel.editMode {
-                    TextField("Primary DNS", text: $viewModel.editPrimary)
+            if viewModel.selectedMode != .auto {
+                Section("DNS Servers") {
+                    TextField("Primary", text: $viewModel.editPrimary)
                         .keyboardType(.decimalPad)
                         .textContentType(.URL)
                         .autocorrectionDisabled()
 
-                    TextField("Secondary DNS", text: $viewModel.editSecondary)
+                    TextField("Secondary", text: $viewModel.editSecondary)
                         .keyboardType(.decimalPad)
                         .textContentType(.URL)
                         .autocorrectionDisabled()
                 }
+            }
 
+            // MARK: - DoH Upstream
+
+            if viewModel.selectedMode == .doh {
+                Section("DoH Upstream") {
+                    TextField("URL", text: $viewModel.editUpstream)
+                        .keyboardType(.URL)
+                        .textContentType(.URL)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                }
+            }
+
+            // MARK: - Apply
+
+            Section {
                 Button {
-                    Task { await viewModel.applyDNS() }
+                    Task { await viewModel.apply() }
                 } label: {
                     Text("Apply")
                         .frame(maxWidth: .infinity)
@@ -57,19 +69,46 @@ struct DNSSettingsView: View {
                 .disabled(viewModel.isLoading)
             }
 
+            // MARK: - Quick Setup
+
             Section {
-                Button("Use Cloudflare (1.1.1.1)") {
-                    viewModel.editMode = true
-                    viewModel.editPrimary = "1.1.1.1"
-                    viewModel.editSecondary = "1.0.0.1"
+                Button("Cloudflare (1.1.1.1)") {
+                    viewModel.applyPreset(primary: "1.1.1.1", secondary: "1.0.0.1",
+                                          upstream: "https://1.1.1.1/dns-query")
                 }
-                Button("Use Google (8.8.8.8)") {
-                    viewModel.editMode = true
-                    viewModel.editPrimary = "8.8.8.8"
-                    viewModel.editSecondary = "8.8.4.4"
+                Button("Google (8.8.8.8)") {
+                    viewModel.applyPreset(primary: "8.8.8.8", secondary: "8.8.4.4",
+                                          upstream: "https://8.8.8.8/dns-query")
+                }
+                Button("Quad9 (9.9.9.9)") {
+                    viewModel.applyPreset(primary: "9.9.9.9", secondary: "149.112.112.112",
+                                          upstream: "https://9.9.9.9:5053/dns-query")
                 }
             } header: {
-                Text("Presets")
+                Text("Quick Setup")
+            } footer: {
+                Text("Fills DNS fields. Tap Apply to save.")
+            }
+
+            // MARK: - DoH Cache
+
+            if viewModel.doh.enabled {
+                Section("DoH Cache") {
+                    LabeledContent("Entries", value: "\(viewModel.doh.cacheEntries)")
+                    LabeledContent("Hits", value: "\(viewModel.doh.cacheHits)")
+                    LabeledContent("Misses", value: "\(viewModel.doh.cacheMisses)")
+                    LabeledContent("Hit Ratio", value: String(format: "%.1f%%", viewModel.doh.hitRatio))
+
+                    Button("Inspect Cache") {
+                        viewModel.showCacheInspector = true
+                    }
+                    .disabled(viewModel.cacheEntries.isEmpty)
+
+                    Button("Clear Cache") {
+                        Task { await viewModel.clearCache() }
+                    }
+                    .disabled(viewModel.isLoading || viewModel.doh.cacheEntries == 0)
+                }
             }
         }
         .navigationTitle("DNS Settings")
@@ -82,5 +121,19 @@ struct DNSSettingsView: View {
             }
         }
         .task { await viewModel.refresh() }
+        .sheet(isPresented: $viewModel.showCacheInspector) {
+            DoHCacheInspectorView(entries: viewModel.cacheEntries) {
+                Task { await viewModel.refreshCache() }
+            }
+        }
     }
+
+    private var modeFooter: String {
+        switch viewModel.selectedMode {
+        case .auto: "Use DNS servers assigned by your ISP."
+        case .custom: "Use custom DNS servers."
+        case .doh: "Encrypt DNS queries over HTTPS."
+        }
+    }
+
 }

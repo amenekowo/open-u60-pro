@@ -7,10 +7,10 @@ final class ClientsViewModel {
     var isLoading: Bool = false
     var error: String?
 
-    private let client: UbusClient
+    private let client: AgentClient
     private let authManager: AuthManager
 
-    init(client: UbusClient, authManager: AuthManager) {
+    init(client: AgentClient, authManager: AuthManager) {
         self.client = client
         self.authManager = authManager
     }
@@ -18,29 +18,14 @@ final class ClientsViewModel {
     func refresh() async {
         isLoading = true
         error = nil
-        let token = authManager.sessionToken
 
         do {
-            // Fetch host hints
-            let (_, hintsData) = try await client.call(
-                sessionToken: token, object: "luci-rpc",
-                method: "getHostHints", params: [:]
-            )
-            var deviceList = DeviceParser.parseHostHints(hintsData)
-
-            // Enrich with DHCP lease info
-            do {
-                let (_, dhcpData) = try await client.call(
-                    sessionToken: token, object: "luci-rpc",
-                    method: "getDHCPLeases", params: ["family": 4]
-                )
-                if let leases = dhcpData["dhcp_leases"] as? [[String: Any]] {
-                    DeviceParser.enrichWithDHCP(devices: &deviceList, leases: leases)
-                }
-            } catch {
-                // DHCP enrichment is optional
+            let data = try await client.getJSON("/api/network/clients")
+            let hostsData = data["hosts"] as? [String: Any] ?? [:]
+            var deviceList = DeviceParser.parseHostHints(hostsData)
+            if let leases = data["dhcp_leases"] as? [[String: Any]] {
+                DeviceParser.enrichWithDHCP(devices: &deviceList, leases: leases)
             }
-
             devices = deviceList
         } catch {
             self.error = error.localizedDescription

@@ -19,10 +19,10 @@ final class CellLockViewModel {
     var ltePCI: String = ""
     var lteEARFCN: String = ""
 
-    private let client: UbusClient
+    private let client: AgentClient
     private let authManager: AuthManager
 
-    init(client: UbusClient, authManager: AuthManager) {
+    init(client: AgentClient, authManager: AuthManager) {
         self.client = client
         self.authManager = authManager
     }
@@ -30,15 +30,9 @@ final class CellLockViewModel {
     func refresh() async {
         isLoading = true
         message = nil
-        let token = authManager.sessionToken
 
         do {
-            let (_, data) = try await client.call(
-                sessionToken: token,
-                object: "zte_nwinfo_api",
-                method: "nwinfo_get_netinfo",
-                params: [:]
-            )
+            let data = try await client.getJSON("/api/network/signal")
             status = CellLockParser.parse(data)
         } catch {
             showMessage("Failed to load cell info: \(error.localizedDescription)", isError: true)
@@ -54,18 +48,12 @@ final class CellLockViewModel {
         }
 
         isLoading = true
-        let token = authManager.sessionToken
 
         do {
             var params: [String: Any] = ["pci": nrPCI, "earfcn": nrEARFCN]
             if !nrBand.isEmpty { params["band"] = nrBand }
 
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zte_nwinfo_api",
-                method: "nwinfo_lock_nr_cell",
-                params: params
-            )
+            let _ = try await client.postJSON("/api/cell/lock/nr", body: params)
             showMessage("NR cell locked", isError: false)
             status.locked = true
         } catch {
@@ -82,15 +70,9 @@ final class CellLockViewModel {
         }
 
         isLoading = true
-        let token = authManager.sessionToken
 
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zte_nwinfo_api",
-                method: "nwinfo_lock_lte_cell",
-                params: ["pci": ltePCI, "earfcn": lteEARFCN]
-            )
+            let _ = try await client.postJSON("/api/cell/lock/lte", body: ["pci": ltePCI, "earfcn": lteEARFCN])
             showMessage("LTE cell locked", isError: false)
             status.locked = true
         } catch {
@@ -103,37 +85,21 @@ final class CellLockViewModel {
     func scanNeighbors() async {
         isScanning = true
         neighbors = []
-        let token = authManager.sessionToken
 
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zte_nwinfo_api",
-                method: "nwinfo_scan_nbr",
-                params: [:]
-            )
+            let _ = try await client.postJSON("/api/cell/neighbors/scan")
 
             // Poll for results
             try await Task.sleep(for: .seconds(3))
 
             // Fetch NR neighbors
-            if let nrCells = try? await client.call(
-                sessionToken: token,
-                object: "zte_nwinfo_api",
-                method: "nwinfo_get_nr5g_nbr_contents",
-                params: [:]
-            ) {
-                neighbors += CellLockParser.parseNeighbors(nrCells.1, type: "NR")
+            if let nrData = try? await client.getJSON("/api/cell/neighbors/nr") {
+                neighbors += CellLockParser.parseNeighbors(nrData, type: "NR")
             }
 
             // Fetch LTE neighbors
-            if let lteCells = try? await client.call(
-                sessionToken: token,
-                object: "zte_nwinfo_api",
-                method: "nwinfo_get_lte_nbr_contents",
-                params: [:]
-            ) {
-                neighbors += CellLockParser.parseNeighbors(lteCells.1, type: "LTE")
+            if let lteData = try? await client.getJSON("/api/cell/neighbors/lte") {
+                neighbors += CellLockParser.parseNeighbors(lteData, type: "LTE")
             }
 
             if neighbors.isEmpty {
@@ -150,15 +116,9 @@ final class CellLockViewModel {
 
     func unlock() async {
         isLoading = true
-        let token = authManager.sessionToken
 
         do {
-            let (_, _) = try await client.call(
-                sessionToken: token,
-                object: "zte_nwinfo_api",
-                method: "nwinfo_reset_band_cell_setting",
-                params: [:]
-            )
+            let _ = try await client.postJSON("/api/cell/lock/reset")
             showMessage("Cell lock reset", isError: false)
             status.locked = false
         } catch {

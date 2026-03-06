@@ -1,8 +1,7 @@
 import Foundation
-import CryptoKit
 import Observation
 
-/// Manages authentication state and session tokens for the ZTE ubus API.
+/// Manages authentication state and session tokens for the zte-agent API.
 @Observable
 @MainActor
 final class AuthManager {
@@ -14,77 +13,26 @@ final class AuthManager {
     }
 
     var state: AuthState = .idle
-    var sessionToken: String = UbusClient.anonSession
 
-    private let client: UbusClient
-    private let maxSaltRetries = 3
+    var sessionToken: String {
+        client.token ?? ""
+    }
 
     var isAuthenticated: Bool { state == .authenticated }
 
-    init(client: UbusClient) {
+    private let client: AgentClient
+
+    init(client: AgentClient) {
         self.client = client
     }
 
-    /// Fetch the login salt from the router.
-    /// The salt field is named `zte_web_sault` (ZTE typo). Retries up to 3 times since it can be flaky.
-    private func fetchSalt() async throws -> String {
-        var lastError: Error?
-        for attempt in 1...maxSaltRetries {
-            do {
-                let (_, data) = try await client.callAnon(
-                    object: "zwrt_web",
-                    method: "web_login_info",
-                    params: [:]
-                )
-                if let salt = data["zte_web_sault"] as? String, !salt.isEmpty {
-                    return salt
-                }
-                lastError = UbusError.authenticationFailed("Empty salt returned")
-            } catch {
-                lastError = error
-            }
-            if attempt < maxSaltRetries {
-                try await Task.sleep(nanoseconds: 500_000_000)
-            }
-        }
-        throw lastError ?? UbusError.authenticationFailed("Failed to fetch salt")
-    }
-
-    /// Compute the ZTE double-SHA256 password hash.
-    /// Formula: UPPER(SHA256(UPPER(SHA256(password)) + salt))
-    private func hashPassword(_ password: String, salt: String) -> String {
-        let passData = Data(password.utf8)
-        let firstHash = SHA256.hash(data: passData)
-        let firstHex = firstHash.map { String(format: "%02x", $0) }.joined().uppercased()
-        let combined = Data((firstHex + salt).utf8)
-        let secondHash = SHA256.hash(data: combined)
-        let secondHex = secondHash.map { String(format: "%02x", $0) }.joined().uppercased()
-        return secondHex
-    }
-
-    /// Perform full login: fetch salt, hash password, authenticate.
+    /// Perform login with plaintext password via the agent.
     func login(password: String) async {
         state = .authenticating
         do {
-            let salt = try await fetchSalt()
-            let hashedPassword = hashPassword(password, salt: salt)
-
-            let (_, data) = try await client.callAnon(
-                object: "zwrt_web",
-                method: "web_login",
-                params: ["password": hashedPassword]
-            )
-
-            guard let token = data["ubus_rpc_session"] as? String,
-                  token != UbusClient.anonSession,
-                  !token.isEmpty else {
-                state = .failed("Invalid credentials")
-                return
-            }
-
-            sessionToken = token
+            try await client.login(password: password)
             state = .authenticated
-        } catch let error as UbusError {
+        } catch let error as AgentError {
             state = .failed(error.localizedDescription)
         } catch {
             state = .failed(error.localizedDescription)
@@ -93,29 +41,17 @@ final class AuthManager {
 
     /// Clear the current session.
     func logout() {
-        sessionToken = UbusClient.anonSession
+        client.token = nil
         state = .idle
     }
 
     /// Re-authenticate silently using stored credentials.
-    /// Does NOT change auth state on failure — the user stays logged in.
+    /// Does NOT change auth state on failure.
     func reauthenticate() async -> Bool {
         guard let password = KeychainHelper.load(key: "router_password") else { return false }
         do {
-            let salt = try await fetchSalt()
-            let hashedPassword = hashPassword(password, salt: salt)
-            let (_, data) = try await client.callAnon(
-                object: "zwrt_web",
-                method: "web_login",
-                params: ["password": hashedPassword]
-            )
-            guard let token = data["ubus_rpc_session"] as? String,
-                  token != UbusClient.anonSession,
-                  !token.isEmpty else {
-                return false
-            }
-            sessionToken = token
-            state = .authenticated  // refresh state in case it drifted
+            try await client.login(password: password)
+            state = .authenticated
             return true
         } catch {
             return false

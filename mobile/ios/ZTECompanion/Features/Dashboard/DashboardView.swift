@@ -3,18 +3,24 @@ import SwiftUI
 struct DashboardView: View {
     var viewModel: DashboardViewModel
     let isAuthenticated: Bool
-    let client: UbusClient
+    let client: AgentClient
     let authManager: AuthManager
 
     @State private var signalMonitorVM: SignalMonitorViewModel
+    @State private var networkModeVM: NetworkModeViewModel
+    @State private var showNetworkModeSheet = false
+    @State private var showBatteryDetailSheet = false
+    @State private var showCPUDetailSheet = false
     @State private var showAllDevices = true
+    @State private var showWiFiShare = false
 
-    init(viewModel: DashboardViewModel, isAuthenticated: Bool, client: UbusClient, authManager: AuthManager) {
+    init(viewModel: DashboardViewModel, isAuthenticated: Bool, client: AgentClient, authManager: AuthManager) {
         self.viewModel = viewModel
         self.isAuthenticated = isAuthenticated
         self.client = client
         self.authManager = authManager
         _signalMonitorVM = State(initialValue: SignalMonitorViewModel(client: client, authManager: authManager))
+        _networkModeVM = State(initialValue: NetworkModeViewModel(client: client, authManager: authManager))
     }
 
     var body: some View {
@@ -57,20 +63,15 @@ struct DashboardView: View {
                         )
                         .transition(.move(edge: .top).combined(with: .opacity))
                     }
-                    if viewModel.companionUnavailable {
-                        SIMAlertBanner(
-                            icon: "puzzlepiece.extension",
-                            title: "Companion Plugin Unavailable",
-                            message: "CPU, battery current, and bandwidth data are degraded. Run \"zte companion repair\" to fix.",
-                            color: .purple
-                        )
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                    }
                     OperatorCardView(
                         operatorInfo: viewModel.operatorInfo,
                         nrSignal: viewModel.nrSignal,
                         lteSignal: viewModel.lteSignal
                     )
+                    .onLongPressGesture {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        showNetworkModeSheet = true
+                    }
                     NavigationLink {
                         SignalMonitorView(viewModel: signalMonitorVM)
                     } label: {
@@ -90,9 +91,26 @@ struct DashboardView: View {
                     )
                     HStack(spacing: 16) {
                         BatteryCardView(battery: viewModel.battery)
+                            .onLongPressGesture {
+                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                showBatteryDetailSheet = true
+                            }
                         CPUCardView(systemInfo: viewModel.systemInfo, thermal: viewModel.thermal)
+                            .onLongPressGesture {
+                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                showCPUDetailSheet = true
+                            }
                     }
-                    WiFiCardView(wifiStatus: viewModel.wifiStatus)
+                    WiFiCardView(wifiStatus: viewModel.wifiStatus, showWiFiShare: $showWiFiShare)
+                    if showWiFiShare {
+                        WiFiShareCardView(
+                            wifiStatus: viewModel.wifiStatus,
+                            client: client,
+                            authManager: authManager,
+                            isExpanded: $showWiFiShare
+                        )
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
                     DevicesCardView(
                         connectedDevices: viewModel.connectedDevices,
                         showAllDevices: $showAllDevices
@@ -101,6 +119,20 @@ struct DashboardView: View {
                 .padding()
             }
             .background(Color(.systemGroupedBackground))
+            .sheet(isPresented: $showNetworkModeSheet) {
+                NavigationStack {
+                    NetworkModeView(viewModel: networkModeVM)
+                }
+                .presentationDetents([.medium])
+            }
+            .sheet(isPresented: $showBatteryDetailSheet) {
+                BatteryDetailSheet(battery: viewModel.battery)
+                    .presentationDetents([.medium])
+            }
+            .sheet(isPresented: $showCPUDetailSheet) {
+                CPUDetailSheet(systemInfo: viewModel.systemInfo, thermal: viewModel.thermal)
+                    .presentationDetents([.medium])
+            }
             .navigationTitle("Dashboard")
             .refreshable { await viewModel.refresh() }
             .toolbar {
@@ -146,8 +178,8 @@ private struct SIMAlertBanner: View {
                 .font(.title2)
                 .foregroundStyle(color)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.subheadline.bold())
-                Text(message).font(.caption).foregroundStyle(.secondary)
+                Text(title).font(.subheadline.bold()).textSelection(.enabled)
+                Text(message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             }
             Spacer()
         }

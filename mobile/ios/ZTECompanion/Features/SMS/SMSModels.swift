@@ -175,7 +175,7 @@ enum SMSParser {
         }.sorted { $0.latestTime > $1.latestTime }
     }
 
-    /// Parse raw ubus SMS data into SMSMessage array.
+    /// Parse raw SMS data from the agent into SMSMessage array.
     /// Response format: { "messages": [ { "id":Int, "number":String, "content":String(UCS2hex),
     ///   "date":"YY,MM,DD,HH,MM,SS,TZ", "tag":"0".."4", "draft_group_id":String, "mem_store":String } ] }
     static func parseMessages(_ data: [String: Any]) -> [SMSMessage] {

@@ -7,13 +7,13 @@ struct ZTECompanionApp: App {
     @AppStorage("gateway_ip") private var gatewayIP: String = "192.168.0.1"
     @AppStorage("dark_mode_override") private var darkModeOverride: Int = 0
 
-    private let client: UbusClient
+    private let client: AgentClient
 
     init() {
         let savedIP = UserDefaults.standard.string(forKey: "gateway_ip") ?? "192.168.0.1"
-        let ubusClient = UbusClient(gatewayIP: savedIP)
-        self.client = ubusClient
-        _authManager = State(initialValue: AuthManager(client: ubusClient))
+        let agentClient = AgentClient(baseURL: "http://\(savedIP):9090")
+        self.client = agentClient
+        _authManager = State(initialValue: AuthManager(client: agentClient))
 
         let navAppearance = UINavigationBarAppearance()
         navAppearance.configureWithTransparentBackground()
@@ -32,7 +32,7 @@ struct ZTECompanionApp: App {
             rootView
                 .preferredColorScheme(colorScheme)
                 .onChange(of: gatewayIP) {
-                    client.gatewayIP = gatewayIP
+                    client.baseURL = "http://\(gatewayIP):9090"
                 }
         }
     }

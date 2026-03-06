@@ -2,6 +2,7 @@ import SwiftUI
 
 struct WiFiCardView: View {
     let wifiStatus: WifiStatus
+    @Binding var showWiFiShare: Bool
 
     var body: some View {
         CardView {
@@ -38,9 +39,7 @@ struct WiFiCardView: View {
                         ssid: wifiStatus.ssid2g,
                         hidden: wifiStatus.hidden2g,
                         encryption: wifiStatus.encryption2g,
-                        channel: wifiStatus.channel2g,
-                        txPower: wifiStatus.txPower2g,
-                        bandwidth: wifiStatus.bandwidth2g
+                        channel: wifiStatus.channel2g
                     )
                     wifiBandRow(
                         label: "5G",
@@ -48,19 +47,32 @@ struct WiFiCardView: View {
                         ssid: wifiStatus.ssid5g,
                         hidden: wifiStatus.hidden5g,
                         encryption: wifiStatus.encryption5g,
-                        channel: wifiStatus.channel5g,
-                        txPower: wifiStatus.txPower5g,
-                        bandwidth: wifiStatus.bandwidth5g
+                        channel: wifiStatus.channel5g
                     )
+
+                    if wifiStatus.guestEnabled {
+                        HStack {
+                            Label("Guest", systemImage: "wifi.exclamationmark")
+                                .font(.caption)
+                            Spacer()
+                            Text(wifiStatus.guestSsid)
+                                .font(.caption.bold())
+                                .lineLimit(1)
+                        }
+                    }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .onTapGesture {
+            guard wifiStatus.wifiOn else { return }
+            withAnimation { showWiFiShare.toggle() }
         }
     }
 
     private func wifiBandRow(
         label: String, disabled: Bool, ssid: String, hidden: Bool,
-        encryption: String, channel: String, txPower: String,
-        bandwidth: String
+        encryption: String, channel: String
     ) -> some View {
         HStack {
             Label(label, systemImage: "wifi")
@@ -91,27 +103,7 @@ struct WiFiCardView: View {
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
-                if let bwLabel = formatBandwidth(bandwidth) {
-                    Text(bwLabel)
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-                if !txPower.isEmpty {
-                    Text("TX \(txPower)%")
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
             }
         }
-    }
-
-    private func formatBandwidth(_ htmode: String) -> String? {
-        let mode = htmode.uppercased()
-        guard !mode.isEmpty, mode != "AUTO" else { return nil }
-        // Extract width from EHT160, HE80, VHT40, HT20, etc.
-        if let range = mode.range(of: "\\d+$", options: .regularExpression) {
-            return mode[range] + "M"
-        }
-        return nil
     }
 }

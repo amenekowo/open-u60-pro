@@ -89,6 +89,19 @@ final class AgentClient {
         return json["data"] as? [String: Any] ?? [:]
     }
 
+    /// DELETE with a raw dict body and return the `data` field as a raw dictionary.
+    func deleteJSON(_ path: String, body: [String: Any] = [:]) async throws -> [String: Any] {
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        let data = try await request(method: "DELETE", path: path, body: bodyData)
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw AgentError.decodingError("Expected JSON object")
+        }
+        guard let ok = json["ok"] as? Bool, ok else {
+            throw AgentError.serverError(json["error"] as? String ?? "Unknown error")
+        }
+        return json["data"] as? [String: Any] ?? [:]
+    }
+
     // MARK: - Auth
 
     /// Login with plaintext password. Returns the token string.

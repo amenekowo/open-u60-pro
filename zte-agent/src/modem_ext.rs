@@ -21,11 +21,15 @@ pub fn modem_data_set(_state: &AppState, body: &[u8]) -> (u16, Value) {
     }
 }
 
-pub fn modem_airplane(_state: &AppState, body: &[u8]) -> (u16, Value) {
+pub fn modem_airplane(state: &AppState, body: &[u8]) -> (u16, Value) {
     let parsed: Value = match serde_json::from_slice(body) {
         Ok(v) => v,
         Err(_) => return (400, json!({"ok": false, "error": "invalid JSON"})),
     };
+    // Use AT+CFUN=1 for ONLINE (ubus nwinfo_set_mode ONLINE is broken for LPM→ONLINE recovery)
+    if parsed["operate_mode"].as_str() == Some("ONLINE") {
+        return crate::handlers::modem_online(state);
+    }
     match ubus::call("zte_nwinfo_api", "nwinfo_set_mode", Some(&parsed.to_string())) {
         Ok(data) => (200, json!({"ok": true, "data": data})),
         Err(e) => (503, json!({"ok": false, "error": e})),

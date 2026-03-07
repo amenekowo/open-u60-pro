@@ -22,6 +22,10 @@ fun ToolsListScreen(
     onNavigateToBandLock: () -> Unit,
     onNavigateToEnableADB: () -> Unit,
     onNavigateToConfigTool: () -> Unit,
+    onNavigateToScheduler: () -> Unit,
+    onNavigateToUSBMode: () -> Unit,
+    onNavigateToSpeedTest: () -> Unit,
+    onNavigateToLANSpeedTest: () -> Unit,
     onNavigateToPlaceholder: (String) -> Unit,
 ) {
     Scaffold(
@@ -67,6 +71,30 @@ fun ToolsListScreen(
                 subtitle = "Enable USB debug mode",
                 onClick = onNavigateToEnableADB,
             )
+            ToolItem(
+                icon = Icons.Default.Schedule,
+                title = "Scheduler",
+                subtitle = "Schedule automated tasks",
+                onClick = onNavigateToScheduler,
+            )
+            ToolItem(
+                icon = Icons.Default.Usb,
+                title = "USB Mode",
+                subtitle = "USB mode and powerbank control",
+                onClick = onNavigateToUSBMode,
+            )
+            ToolItem(
+                icon = Icons.Default.Speed,
+                title = "Speed Test",
+                subtitle = "Test WAN throughput",
+                onClick = onNavigateToSpeedTest,
+            )
+            ToolItem(
+                icon = Icons.Default.Wifi,
+                title = "LAN Speed Test",
+                subtitle = "Test WiFi link to router",
+                onClick = onNavigateToLANSpeedTest,
+            )
 
             Spacer(modifier = Modifier.height(8.dp))
             Text(
@@ -90,31 +118,10 @@ fun ToolsListScreen(
                 modifier = Modifier.padding(bottom = 4.dp),
             )
             ToolItem(
-                icon = Icons.Default.Dns,
-                title = "Custom DNS",
-                subtitle = "Requires ADB USB connection",
-                onClick = { onNavigateToPlaceholder("Custom DNS") },
-                enabled = false,
-            )
-            ToolItem(
                 icon = Icons.Default.Timer,
                 title = "TTL Fix",
                 subtitle = "Requires ADB USB connection",
                 onClick = { onNavigateToPlaceholder("TTL Fix") },
-                enabled = false,
-            )
-            ToolItem(
-                icon = Icons.Default.Shield,
-                title = "Firewall",
-                subtitle = "Requires ADB USB connection",
-                onClick = { onNavigateToPlaceholder("Firewall") },
-                enabled = false,
-            )
-            ToolItem(
-                icon = Icons.Default.VisibilityOff,
-                title = "Telemetry Block",
-                subtitle = "Requires ADB USB connection",
-                onClick = { onNavigateToPlaceholder("Telemetry Block") },
                 enabled = false,
             )
             ToolItem(

@@ -68,55 +68,59 @@ fun SignalMonitorScreen(
                 }
 
                 // Operator info bar
-                val op = state.current.operator
+                val op = state.operatorInfo
                 if (op.provider.isNotBlank()) {
                     Text(
-                        "${op.provider} | ${op.networkType} | Signal: ${op.signalBar}/5",
+                        "${op.provider} | ${op.displayNetworkType(state.nr.isConnected, state.lte)} | Signal: ${op.signalBar}/5",
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
 
                 // NR Signal Panel
-                val nr = state.current.nr
-                SignalPanel(
-                    title = "5G NR",
-                    rows = listOf(
-                        SignalRow("RSRP", nr.rsrp?.let { "$it dBm" } ?: "--", rsrpColor(nr.rsrp)),
-                        SignalRow("RSRQ", nr.rsrq?.let { "$it dB" } ?: "--"),
-                        SignalRow("SINR", nr.sinr?.let { "$it dB" } ?: "--", sinrColor(nr.sinr)),
-                        SignalRow("RSSI", nr.rssi?.let { "$it dBm" } ?: "--"),
-                        SignalRow("Band", if (nr.band.isNotBlank()) "n${nr.band}" else "--"),
-                        SignalRow("PCI", nr.pci.ifBlank { "--" }),
-                        SignalRow("Cell ID", nr.cellId.ifBlank { "--" }),
-                        SignalRow("ARFCN", nr.arfcn.ifBlank { "--" }),
-                        SignalRow("Bandwidth", nr.bandwidth.ifBlank { "--" }),
-                        SignalRow("CA", nr.ca.ifBlank { "--" }),
-                    ),
-                )
+                val nr = state.nr
+                if (nr.hasSignal) {
+                    SignalPanel(
+                        title = "5G NR",
+                        rows = listOf(
+                            SignalRow("RSRP", nr.rsrp?.let { "${it.toInt()} dBm" } ?: "--", rsrpColor(nr.rsrp)),
+                            SignalRow("RSRQ", nr.rsrq?.let { "${it.toInt()} dB" } ?: "--"),
+                            SignalRow("SINR", nr.sinr?.let { "${it.toInt()} dB" } ?: "--", sinrColor(nr.sinr)),
+                            SignalRow("RSSI", nr.rssi?.let { "${it.toInt()} dBm" } ?: "--"),
+                            SignalRow("Band", if (nr.band.isNotBlank()) "n${nr.band}" else "--"),
+                            SignalRow("PCI", nr.pci.ifBlank { "--" }),
+                            SignalRow("Cell ID", nr.cellID.ifBlank { "--" }),
+                            SignalRow("ARFCN", nr.channel.ifBlank { "--" }),
+                            SignalRow("Bandwidth", nr.bandwidth.ifBlank { "--" }),
+                            SignalRow("CA", nr.carrierAggregation.ifBlank { "--" }),
+                        ),
+                    )
+                }
 
                 // LTE Signal Panel
-                val lte = state.current.lte
-                SignalPanel(
-                    title = "LTE",
-                    rows = listOf(
-                        SignalRow("RSRP", lte.rsrp?.let { "$it dBm" } ?: "--", rsrpColor(lte.rsrp)),
-                        SignalRow("RSRQ", lte.rsrq?.let { "$it dB" } ?: "--"),
-                        SignalRow("SINR", lte.sinr?.let { "$it dB" } ?: "--", sinrColor(lte.sinr)),
-                        SignalRow("RSSI", lte.rssi?.let { "$it dBm" } ?: "--"),
-                        SignalRow("CA", lte.ca.ifBlank { "--" }),
-                        SignalRow("CA State", lte.caState.ifBlank { "--" }),
-                    ),
-                )
+                val lte = state.lte
+                if (lte.hasSignal) {
+                    SignalPanel(
+                        title = "LTE",
+                        rows = listOf(
+                            SignalRow("RSRP", lte.rsrp?.let { "${it.toInt()} dBm" } ?: "--", rsrpColor(lte.rsrp)),
+                            SignalRow("RSRQ", lte.rsrq?.let { "${it.toInt()} dB" } ?: "--"),
+                            SignalRow("SINR", lte.sinr?.let { "${it.toInt()} dB" } ?: "--", sinrColor(lte.sinr)),
+                            SignalRow("RSSI", lte.rssi?.let { "${it.toInt()} dBm" } ?: "--"),
+                            SignalRow("CA", lte.carrierAggregation.ifBlank { "--" }),
+                            SignalRow("CA State", lte.caState.ifBlank { "--" }),
+                        ),
+                    )
+                }
 
                 // WCDMA Signal Panel
-                val wcdma = state.current.wcdma
+                val wcdma = state.wcdma
                 if (wcdma.rscp != null || wcdma.ecio != null) {
                     SignalPanel(
                         title = "WCDMA",
                         rows = listOf(
-                            SignalRow("RSCP", wcdma.rscp?.let { "$it dBm" } ?: "--"),
-                            SignalRow("Ec/Io", wcdma.ecio?.let { "$it dB" } ?: "--"),
+                            SignalRow("RSCP", wcdma.rscp?.let { "${it.toInt()} dBm" } ?: "--"),
+                            SignalRow("Ec/Io", wcdma.ecio?.let { "${it.toInt()} dB" } ?: "--"),
                         ),
                     )
                 }
@@ -181,18 +185,18 @@ private fun RSRPHistoryCard(history: List<com.ztecompanion.core.model.SignalSnap
             )
             Spacer(modifier = Modifier.height(8.dp))
 
-            val nrValues = history.mapNotNull { it.nr.rsrp }
-            val lteValues = history.mapNotNull { it.lte.rsrp }
+            val nrValues = history.mapNotNull { it.nrRSRP }
+            val lteValues = history.mapNotNull { it.lteRSRP }
 
             if (nrValues.isNotEmpty()) {
                 Text(
-                    "NR: min ${nrValues.min()} / avg ${nrValues.average().toInt()} / max ${nrValues.max()} dBm",
+                    "NR: min ${nrValues.min().toInt()} / avg ${nrValues.average().toInt()} / max ${nrValues.max().toInt()} dBm",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
             if (lteValues.isNotEmpty()) {
                 Text(
-                    "LTE: min ${lteValues.min()} / avg ${lteValues.average().toInt()} / max ${lteValues.max()} dBm",
+                    "LTE: min ${lteValues.min().toInt()} / avg ${lteValues.average().toInt()} / max ${lteValues.max().toInt()} dBm",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
@@ -206,7 +210,7 @@ private fun RSRPHistoryCard(history: List<com.ztecompanion.core.model.SignalSnap
                 val maxVal = values.max().toFloat()
                 val range = (maxVal - minVal).coerceAtLeast(1f)
                 val sparkline = values.joinToString("") { v ->
-                    val idx = ((v - minVal) / range * (barChars.length - 1)).toInt()
+                    val idx = ((v.toFloat() - minVal) / range * (barChars.length - 1)).toInt()
                         .coerceIn(0, barChars.length - 1)
                     barChars[idx].toString()
                 }
@@ -220,7 +224,7 @@ private fun RSRPHistoryCard(history: List<com.ztecompanion.core.model.SignalSnap
     }
 }
 
-private fun rsrpColor(rsrp: Int?): Color {
+private fun rsrpColor(rsrp: Double?): Color {
     if (rsrp == null) return Color.Unspecified
     return when {
         rsrp >= -80 -> Color(0xFF4CAF50)
@@ -230,7 +234,7 @@ private fun rsrpColor(rsrp: Int?): Color {
     }
 }
 
-private fun sinrColor(sinr: Int?): Color {
+private fun sinrColor(sinr: Double?): Color {
     if (sinr == null) return Color.Unspecified
     return when {
         sinr >= 20 -> Color(0xFF4CAF50)

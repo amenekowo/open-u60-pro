@@ -2,26 +2,30 @@ package com.ztecompanion.feature.deviceinfo
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.ztecompanion.core.model.DeviceInfo
-import com.ztecompanion.core.model.SimInfo
-import com.ztecompanion.core.network.UbusClient
+import com.ztecompanion.core.model.DeviceIdentity
+import com.ztecompanion.core.model.DeviceParser
+import com.ztecompanion.core.network.AgentClient
+import com.ztecompanion.core.network.AgentError
+import com.ztecompanion.core.network.AuthManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.*
 import javax.inject.Inject
 
 data class DeviceInfoState(
-    val info: DeviceInfo = DeviceInfo(),
+    val identity: DeviceIdentity = DeviceIdentity.empty,
     val isLoading: Boolean = false,
     val error: String? = null,
 )
 
 @HiltViewModel
 class DeviceInfoViewModel @Inject constructor(
-    private val ubusClient: UbusClient,
+    private val agentClient: AgentClient,
+    private val authManager: AuthManager,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(DeviceInfoState())
@@ -35,62 +39,28 @@ class DeviceInfoViewModel @Inject constructor(
         viewModelScope.launch {
             _state.value = _state.value.copy(isLoading = true, error = null)
             try {
-                val sim = fetchSimInfo()
-                val imei = fetchImei()
-                val wanIpv4 = fetchWanIpv4()
-                val wanIpv6 = fetchWanIpv6()
-                val lanIp = fetchLanIp()
-                _state.value = _state.value.copy(
-                    info = DeviceInfo(
-                        imei = imei,
-                        sim = sim,
-                        wanIpv4 = wanIpv4,
-                        wanIpv6 = wanIpv6,
-                        lanIp = lanIp,
-                    ),
-                    isLoading = false,
-                )
+                coroutineScope {
+                    val simJob = async { try { agentClient.getJSON("/api/sim/info") } catch (_: Exception) { emptyMap() } }
+                    val imeiJob = async { try { agentClient.getJSON("/api/device/imei") } catch (_: Exception) { emptyMap() } }
+                    val wanJob = async { try { agentClient.getJSON("/api/network/wan") } catch (_: Exception) { emptyMap() } }
+                    val wan6Job = async { try { agentClient.getJSON("/api/network/wan6") } catch (_: Exception) { emptyMap() } }
+                    val lanJob = async { try { agentClient.getJSON("/api/network/lan") } catch (_: Exception) { emptyMap() } }
+
+                    val identity = DeviceParser.parseIdentity(
+                        simInfo = simJob.await(),
+                        imeiData = imeiJob.await(),
+                        wanStatus = wanJob.await(),
+                        wan6Status = wan6Job.await(),
+                        lanStatus = lanJob.await(),
+                    )
+                    _state.value = _state.value.copy(identity = identity, isLoading = false)
+                }
+            } catch (e: AgentError.Unauthorized) {
+                if (authManager.reauthenticate()) refresh()
+                else _state.value = _state.value.copy(isLoading = false, error = "Session expired")
             } catch (e: Exception) {
                 _state.value = _state.value.copy(isLoading = false, error = e.message)
             }
         }
-    }
-
-    private suspend fun fetchSimInfo(): SimInfo {
-        val data = ubusClient.call("zwrt_zte_mdm.api", "get_sim_info") ?: return SimInfo()
-        return SimInfo(
-            iccid = data["sim_iccid"]?.jsonPrimitive?.contentOrNull ?: "",
-            imsi = data["sim_imsi"]?.jsonPrimitive?.contentOrNull ?: "",
-            msisdn = data["msisdn"]?.jsonPrimitive?.contentOrNull ?: "",
-        )
-    }
-
-    private suspend fun fetchImei(): String {
-        val data = ubusClient.call("zwrt_zte_mdm.api", "get_imei") ?: return ""
-        return data["imei"]?.jsonPrimitive?.contentOrNull ?: ""
-    }
-
-    private suspend fun fetchWanIpv4(): String {
-        val data = ubusClient.call("network.interface.zte_wan", "status") ?: return ""
-        val addrs = data["ipv4-address"]?.jsonArray ?: return ""
-        if (addrs.isEmpty()) return ""
-        return addrs[0].jsonObject["address"]?.jsonPrimitive?.contentOrNull ?: ""
-    }
-
-    private suspend fun fetchWanIpv6(): String {
-        val data = ubusClient.call("network.interface.zte_wan6", "status") ?: return ""
-        val addrs = data["ipv6-address"]?.jsonArray ?: return ""
-        for (addr in addrs) {
-            val ip = addr.jsonObject["address"]?.jsonPrimitive?.contentOrNull ?: continue
-            if (!ip.startsWith("fe80")) return ip
-        }
-        return ""
-    }
-
-    private suspend fun fetchLanIp(): String {
-        val data = ubusClient.call("network.interface.lan", "status") ?: return ""
-        val addrs = data["ipv4-address"]?.jsonArray ?: return ""
-        if (addrs.isEmpty()) return ""
-        return addrs[0].jsonObject["address"]?.jsonPrimitive?.contentOrNull ?: ""
     }
 }

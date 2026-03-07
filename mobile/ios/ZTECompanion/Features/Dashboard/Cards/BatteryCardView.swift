@@ -52,10 +52,10 @@ struct BatteryCardView: View {
     @ViewBuilder
     private var batteryStatusText: some View {
         switch battery.charging {
-        case "wall":
-            Text("Wall Mode")
+        case "stopped":
+            Text("Charge Stopped")
                 .font(.caption)
-                .foregroundStyle(.blue)
+                .foregroundStyle(.orange)
         case "charging":
             if battery.capacity >= 100 {
                 Text("Full")
@@ -95,7 +95,7 @@ struct BatteryCardView: View {
 
     private var batteryStatusColor: Color {
         switch battery.charging {
-        case "wall": return .blue
+        case "stopped": return .orange
         case "charging": return .green
         default: return Color.batteryColor(battery.capacity)
         }
@@ -156,7 +156,7 @@ struct BatteryDetailSheet: View {
 
     private var statusLabel: String {
         switch battery.charging {
-        case "wall": return "Wall Mode"
+        case "stopped": return "Charge Stopped"
         case "charging": return battery.capacity >= 100 ? "Full" : "Charging"
         default: return "Discharging"
         }

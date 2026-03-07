@@ -3,9 +3,10 @@ package com.ztecompanion.feature.signal
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ztecompanion.core.model.*
+import com.ztecompanion.core.network.AgentClient
+import com.ztecompanion.core.network.AgentError
 import com.ztecompanion.core.network.AuthManager
 import com.ztecompanion.core.network.AuthState
-import com.ztecompanion.core.network.UbusClient
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -14,11 +15,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.*
 import javax.inject.Inject
 
 data class SignalMonitorState(
-    val current: SignalSnapshot = SignalSnapshot(),
+    val nr: NRSignal = NRSignal.empty,
+    val lte: LTESignal = LTESignal.empty,
+    val wcdma: WCDMASignal = WCDMASignal.empty,
+    val operatorInfo: OperatorInfo = OperatorInfo.empty,
     val history: List<SignalSnapshot> = emptyList(),
     val isLoading: Boolean = false,
     val error: String? = null,
@@ -26,7 +29,7 @@ data class SignalMonitorState(
 
 @HiltViewModel
 class SignalMonitorViewModel @Inject constructor(
-    private val ubusClient: UbusClient,
+    private val agentClient: AgentClient,
     private val authManager: AuthManager,
 ) : ViewModel() {
 
@@ -72,53 +75,31 @@ class SignalMonitorViewModel @Inject constructor(
     private suspend fun fetchSignal() {
         _state.value = _state.value.copy(isLoading = true, error = null)
         try {
-            val data = ubusClient.call("zte_nwinfo_api", "nwinfo_get_netinfo")
-            if (data != null) {
-                val snapshot = SignalSnapshot(
-                    nr = NRSignal(
-                        rsrp = data["nr5g_rsrp"]?.jsonPrimitive?.intOrNull,
-                        rsrq = data["nr5g_rsrq"]?.jsonPrimitive?.intOrNull,
-                        sinr = data["nr5g_snr"]?.jsonPrimitive?.intOrNull,
-                        rssi = data["nr5g_rssi"]?.jsonPrimitive?.intOrNull,
-                        band = data["nr5g_action_band"]?.jsonPrimitive?.contentOrNull ?: "",
-                        pci = data["nr5g_pci"]?.jsonPrimitive?.contentOrNull ?: "",
-                        cellId = data["nr5g_cell_id"]?.jsonPrimitive?.contentOrNull ?: "",
-                        arfcn = data["nr5g_action_channel"]?.jsonPrimitive?.contentOrNull ?: "",
-                        bandwidth = data["nr5g_bandwidth"]?.jsonPrimitive?.contentOrNull ?: "",
-                        ca = data["nrca"]?.jsonPrimitive?.contentOrNull ?: "",
-                    ),
-                    lte = LTESignal(
-                        rsrp = data["lte_rsrp"]?.jsonPrimitive?.intOrNull,
-                        rsrq = data["lte_rsrq"]?.jsonPrimitive?.intOrNull,
-                        sinr = data["lte_snr"]?.jsonPrimitive?.intOrNull,
-                        rssi = data["lte_rssi"]?.jsonPrimitive?.intOrNull,
-                        ca = data["lteca"]?.jsonPrimitive?.contentOrNull ?: "",
-                        caState = data["lteca_state"]?.jsonPrimitive?.contentOrNull ?: "",
-                        caSig = data["ltecasig"]?.jsonPrimitive?.contentOrNull ?: "",
-                    ),
-                    wcdma = WCDMASignal(
-                        rscp = data["rscp"]?.jsonPrimitive?.intOrNull,
-                        ecio = data["ecio"]?.jsonPrimitive?.intOrNull,
-                    ),
-                    operator = OperatorInfo(
-                        provider = data["network_provider"]?.jsonPrimitive?.contentOrNull ?: "",
-                        networkType = data["network_type"]?.jsonPrimitive?.contentOrNull ?: "",
-                        signalBar = data["signalbar"]?.jsonPrimitive?.intOrNull ?: 0,
-                        roaming = data["simcard_roam"]?.jsonPrimitive?.contentOrNull ?: "",
-                    ),
-                )
-                val newHistory = (_state.value.history + snapshot).takeLast(maxHistory)
-                _state.value = _state.value.copy(
-                    current = snapshot,
-                    history = newHistory,
-                    isLoading = false,
-                )
+            val data = agentClient.getJSON("/api/network/signal")
+            val result = SignalParser.parseNetInfo(data)
+
+            val snapshot = SignalSnapshot.create(
+                nrRSRP = result.nr.rsrp,
+                lteRSRP = result.lte.rsrp,
+            )
+            val newHistory = (_state.value.history + snapshot).takeLast(maxHistory)
+
+            _state.value = _state.value.copy(
+                nr = result.nr,
+                lte = result.lte,
+                wcdma = result.wcdma,
+                operatorInfo = result.operatorInfo,
+                history = newHistory,
+                isLoading = false,
+            )
+        } catch (e: AgentError.Unauthorized) {
+            if (authManager.reauthenticate()) {
+                fetchSignal()
+            } else {
+                _state.value = _state.value.copy(isLoading = false, error = "Session expired")
             }
         } catch (e: Exception) {
-            _state.value = _state.value.copy(
-                isLoading = false,
-                error = e.message,
-            )
+            _state.value = _state.value.copy(isLoading = false, error = e.message)
         }
     }
 

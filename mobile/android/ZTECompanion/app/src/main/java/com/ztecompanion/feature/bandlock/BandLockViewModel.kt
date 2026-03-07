@@ -3,14 +3,14 @@ package com.ztecompanion.feature.bandlock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ztecompanion.core.model.BandConfig
-import com.ztecompanion.core.network.UbusClient
+import com.ztecompanion.core.network.AgentClient
+import com.ztecompanion.core.network.AgentError
+import com.ztecompanion.core.network.AuthManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import javax.inject.Inject
 
 data class BandLockState(
@@ -23,7 +23,8 @@ data class BandLockState(
 
 @HiltViewModel
 class BandLockViewModel @Inject constructor(
-    private val ubusClient: UbusClient,
+    private val agentClient: AgentClient,
+    private val authManager: AuthManager,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(BandLockState())
@@ -47,22 +48,21 @@ class BandLockViewModel @Inject constructor(
         viewModelScope.launch {
             _state.value = _state.value.copy(isLoading = true, error = null, successMessage = null)
             try {
-                // Lock NSA bands
-                val nsaParams = buildJsonObject {
-                    put("nr5g_type", "nsa")
-                    put("nr5g_band", bands)
-                }
-                ubusClient.call("zte_nwinfo_api", "nwinfo_set_nrbandlock", nsaParams)
-                // Lock SA bands
-                val saParams = buildJsonObject {
-                    put("nr5g_type", "sa")
-                    put("nr5g_band", bands)
-                }
-                ubusClient.call("zte_nwinfo_api", "nwinfo_set_nrbandlock", saParams)
+                agentClient.postJSON("/api/modem/bands/nr/lock", mapOf(
+                    "nr5g_band" to bands,
+                    "nr5g_type" to "nsa",
+                ))
+                agentClient.postJSON("/api/modem/bands/nr/lock", mapOf(
+                    "nr5g_band" to bands,
+                    "nr5g_type" to "sa",
+                ))
                 _state.value = _state.value.copy(
                     isLoading = false,
                     successMessage = "NR bands locked to: $bands",
                 )
+            } catch (e: AgentError.Unauthorized) {
+                if (authManager.reauthenticate()) applyNRLock()
+                else _state.value = _state.value.copy(isLoading = false, error = e.message)
             } catch (e: Exception) {
                 _state.value = _state.value.copy(isLoading = false, error = e.message)
             }
@@ -75,17 +75,19 @@ class BandLockViewModel @Inject constructor(
         viewModelScope.launch {
             _state.value = _state.value.copy(isLoading = true, error = null, successMessage = null)
             try {
-                val params = buildJsonObject {
-                    put("is_lte_band", "1")
-                    put("lte_band_mask", bands)
-                    put("is_gw_band", "0")
-                    put("gw_band_mask", "")
-                }
-                ubusClient.call("zte_nwinfo_api", "nwinfo_set_gwl_bandlock", params)
+                agentClient.postJSON("/api/modem/bands/lte/lock", mapOf(
+                    "lte_band_mask" to bands,
+                    "is_lte_band" to "1",
+                    "is_gw_band" to "0",
+                    "gw_band_mask" to "",
+                ))
                 _state.value = _state.value.copy(
                     isLoading = false,
                     successMessage = "LTE bands locked to: $bands",
                 )
+            } catch (e: AgentError.Unauthorized) {
+                if (authManager.reauthenticate()) applyLTELock()
+                else _state.value = _state.value.copy(isLoading = false, error = e.message)
             } catch (e: Exception) {
                 _state.value = _state.value.copy(isLoading = false, error = e.message)
             }
@@ -96,13 +98,16 @@ class BandLockViewModel @Inject constructor(
         viewModelScope.launch {
             _state.value = _state.value.copy(isLoading = true, error = null, successMessage = null)
             try {
-                ubusClient.call("zte_nwinfo_api", "nwinfo_rest_band_rat")
+                agentClient.deleteJSON("/api/modem/bands/lock")
                 _state.value = _state.value.copy(
                     isLoading = false,
                     selectedNRBands = emptySet(),
                     selectedLTEBands = emptySet(),
                     successMessage = "All bands unlocked",
                 )
+            } catch (e: AgentError.Unauthorized) {
+                if (authManager.reauthenticate()) unlockAll()
+                else _state.value = _state.value.copy(isLoading = false, error = e.message)
             } catch (e: Exception) {
                 _state.value = _state.value.copy(isLoading = false, error = e.message)
             }

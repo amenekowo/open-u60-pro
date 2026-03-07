@@ -15,7 +15,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.ztecompanion.core.model.formatSpeed
+import com.ztecompanion.core.model.DeviceParser
 import com.ztecompanion.core.network.AuthState
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -25,175 +25,337 @@ fun DashboardScreen(
     onNavigateToLogin: () -> Unit,
     viewModel: DashboardViewModel = hiltViewModel(),
 ) {
-    val state by viewModel.state.collectAsState()
     val authState by viewModel.authState.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val error by viewModel.error.collectAsState()
+    val nrSignal by viewModel.nrSignal.collectAsState()
+    val lteSignal by viewModel.lteSignal.collectAsState()
+    val operatorInfo by viewModel.operatorInfo.collectAsState()
+    val battery by viewModel.battery.collectAsState()
+    val thermal by viewModel.thermal.collectAsState()
+    val speed by viewModel.speed.collectAsState()
+    val trafficStats by viewModel.trafficStats.collectAsState()
+    val wanIPv4 by viewModel.wanIPv4.collectAsState()
+    val wanIPv6 by viewModel.wanIPv6.collectAsState()
+    val wifiStatus by viewModel.wifiStatus.collectAsState()
+    val systemInfo by viewModel.systemInfo.collectAsState()
+    val connectedDevices by viewModel.connectedDevices.collectAsState()
+    val isAirplaneMode by viewModel.isAirplaneMode.collectAsState()
+    val isMobileDataOff by viewModel.isMobileDataOff.collectAsState()
+    val simPinRequired by viewModel.simPinRequired.collectAsState()
+    val simPukRequired by viewModel.simPukRequired.collectAsState()
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("ZTE Companion") },
-                actions = {
-                    if (authState != AuthState.LOGGED_IN) {
-                        TextButton(onClick = onNavigateToLogin) {
-                            Text("Login")
-                        }
-                    }
-                },
-            )
-        },
-    ) { padding ->
-        if (authState != AuthState.LOGGED_IN) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = Alignment.Center,
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        Icons.Default.Router,
-                        contentDescription = null,
-                        modifier = Modifier.size(64.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text("Not connected", style = MaterialTheme.typography.titleMedium)
-                    Spacer(modifier = Modifier.height(8.dp))
+    if (authState != AuthState.LOGGED_IN) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    Icons.Default.Router,
+                    contentDescription = null,
+                    modifier = Modifier.size(64.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("Not connected", style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Login to view dashboard",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(onClick = onNavigateToLogin) {
+                    Text("Login")
+                }
+            }
+        }
+        return
+    }
+
+    PullToRefreshBox(
+        isRefreshing = isLoading,
+        onRefresh = { viewModel.refresh() },
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            // Error card
+            if (error != null) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                    ),
+                ) {
                     Text(
-                        "Login to view dashboard",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        error!!,
+                        modifier = Modifier.padding(16.dp),
+                        color = MaterialTheme.colorScheme.onErrorContainer,
                     )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Button(onClick = onNavigateToLogin) {
-                        Text("Login")
+                }
+            }
+
+            // Airplane mode banner
+            if (isAirplaneMode) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = Color(0xFFFFF3E0),
+                    ),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Default.AirplanemodeActive, contentDescription = null, tint = Color(0xFFE65100))
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text("Airplane Mode is active", color = Color(0xFFE65100))
                     }
                 }
             }
-            return@Scaffold
-        }
 
-        PullToRefreshBox(
-            isRefreshing = state.isLoading,
-            onRefresh = { viewModel.refresh() },
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                if (state.error != null) {
-                    Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer,
-                        ),
+            // Mobile data off banner
+            if (isMobileDataOff && !isAirplaneMode) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = Color(0xFFFFF3E0),
+                    ),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        Icon(Icons.Default.MobiledataOff, contentDescription = null, tint = Color(0xFFE65100))
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text("Mobile data is disabled", color = Color(0xFFE65100))
+                    }
+                }
+            }
+
+            // SIM PIN/PUK required banner
+            if (simPukRequired) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                    ),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Default.SimCardAlert, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text("SIM PUK required", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            } else if (simPinRequired) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = Color(0xFFFFF3E0),
+                    ),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Default.SimCardAlert, contentDescription = null, tint = Color(0xFFE65100))
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text("SIM PIN required", color = Color(0xFFE65100))
+                    }
+                }
+            }
+
+            // Operator + network type header
+            val displayType = operatorInfo.displayNetworkType(nrSignal.isConnected, lteSignal)
+            if (operatorInfo.provider.isNotBlank()) {
+                Text(
+                    "${operatorInfo.provider} - $displayType",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            // Signal + Battery row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                val rsrp = nrSignal.rsrp ?: lteSignal.rsrp
+                val sccCount = nrSignal.sccCarriers.size + lteSignal.sccCarriers.size
+                val signalSubtitle = buildString {
+                    append(signalQualityLabel(rsrp))
+                    if (sccCount > 0) append(" +${sccCount}CA")
+                }
+                DashboardCard(
+                    modifier = Modifier.weight(1f),
+                    icon = Icons.Default.SignalCellularAlt,
+                    title = if (nrSignal.isConnected) "NR Signal" else "LTE Signal",
+                    value = if (rsrp != null) "${rsrp.toInt()} dBm" else "--",
+                    subtitle = signalSubtitle,
+                    valueColor = rsrpColor(rsrp),
+                    onClick = onNavigateToSignal,
+                )
+                val chargingLabel = when (battery.charging) {
+                    "charging" -> "Charging"
+                    "stopped" -> "Charge Stopped"
+                    else -> "Discharging"
+                }
+                val currentStr = battery.currentMA?.let { "${it}mA" } ?: ""
+                val battSubtitle = listOfNotNull(
+                    chargingLabel,
+                    currentStr.ifEmpty { null },
+                ).joinToString(" ")
+                DashboardCard(
+                    modifier = Modifier.weight(1f),
+                    icon = Icons.Default.BatteryStd,
+                    title = "Battery",
+                    value = "${battery.capacity}%",
+                    subtitle = battSubtitle,
+                    valueColor = batteryColor(battery.capacity),
+                )
+            }
+
+            // CPU + Cellular row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                val cpuLabel = "%.0f%%".format(systemInfo.cpuUsagePercent)
+                val uptimeStr = formatUptime(systemInfo.uptime)
+                DashboardCard(
+                    modifier = Modifier.weight(1f),
+                    icon = Icons.Default.Memory,
+                    title = "CPU",
+                    value = cpuLabel,
+                    subtitle = "${thermal.cpuTemp.toInt()}\u00B0C  $uptimeStr",
+                    valueColor = if (systemInfo.cpuUsagePercent > 80) Color(0xFFF44336) else Color.Unspecified,
+                )
+                DashboardCard(
+                    modifier = Modifier.weight(1f),
+                    icon = Icons.Default.SwapVert,
+                    title = "Cellular",
+                    value = DeviceParser.formatSpeed(speed.downloadBytesPerSec),
+                    subtitle = DeviceParser.formatBytes(trafficStats.rxBytes + trafficStats.txBytes),
+                )
+            }
+
+            // WiFi card
+            if (wifiStatus.wifiOn) {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.Wifi,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("WiFi", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        if (wifiStatus.ssid2g.isNotBlank() && !wifiStatus.radio2gDisabled) {
+                            Text("2.4G: ${wifiStatus.ssid2g}", style = MaterialTheme.typography.bodyMedium)
+                        }
+                        if (wifiStatus.ssid5g.isNotBlank() && !wifiStatus.radio5gDisabled) {
+                            Text("5G: ${wifiStatus.ssid5g}", style = MaterialTheme.typography.bodyMedium)
+                        }
                         Text(
-                            state.error!!,
-                            modifier = Modifier.padding(16.dp),
-                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            "${connectedDevices.size} clients",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
+            }
 
-                // Operator + network type
-                val op = state.signal.operator
-                if (op.provider.isNotBlank()) {
-                    Text(
-                        "${op.provider} - ${op.networkType}",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    val rsrp = state.signal.nr.rsrp ?: state.signal.lte.rsrp
-                    DashboardCard(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Default.SignalCellularAlt,
-                        title = "Signal",
-                        value = if (rsrp != null) "$rsrp dBm" else "--",
-                        subtitle = signalQualityLabel(rsrp),
-                        valueColor = rsrpColor(rsrp),
-                        onClick = onNavigateToSignal,
-                    )
-                    DashboardCard(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Default.BatteryStd,
-                        title = "Battery",
-                        value = "${state.battery.capacity}%",
-                        subtitle = "${state.battery.temperature}\u00B0C",
-                        valueColor = batteryColor(state.battery.capacity),
-                    )
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    DashboardCard(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Default.Download,
-                        title = "Download",
-                        value = formatSpeed(state.traffic.rxBytesPerSec),
-                        subtitle = "",
-                    )
-                    DashboardCard(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Default.Upload,
-                        title = "Upload",
-                        value = formatSpeed(state.traffic.txBytesPerSec),
-                        subtitle = "",
-                    )
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    DashboardCard(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Default.Devices,
-                        title = "Clients",
-                        value = "${state.clientCount}",
-                        subtitle = "connected",
-                    )
-                    DashboardCard(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Default.Thermostat,
-                        title = "CPU Temp",
-                        value = "${state.thermal.cpuTemp}\u00B0C",
-                        subtitle = if (state.thermal.cpuTemp > 70) "High" else "Normal",
-                        valueColor = if (state.thermal.cpuTemp > 70) Color(0xFFF44336) else Color.Unspecified,
-                    )
-                }
-
-                // NR band info
-                val nrBand = state.signal.nr.band
-                if (nrBand.isNotBlank()) {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text("NR Band", style = MaterialTheme.typography.labelMedium)
-                            Text(
-                                "n$nrBand",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
+            // WAN IPs
+            if (wanIPv4.isNotBlank() || wanIPv6.isNotBlank()) {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.Language,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                            if (state.signal.nr.ca.isNotBlank()) {
-                                Text(
-                                    "CA: ${state.signal.nr.ca}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("WAN", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        if (wanIPv4.isNotBlank()) {
+                            Text("IPv4: $wanIPv4", style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (wanIPv6.isNotBlank()) {
+                            Text(
+                                "IPv6: $wanIPv6",
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Connected devices preview
+            if (connectedDevices.isNotEmpty()) {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.Devices,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                "${connectedDevices.size} Devices",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        connectedDevices.take(5).forEach { device ->
+                            Text(
+                                "${device.displayName}  ${device.ipAddress}",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                        if (connectedDevices.size > 5) {
+                            Text(
+                                "+${connectedDevices.size - 5} more",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                }
+            }
+
+            // NR band info
+            val nrBand = nrSignal.band
+            if (nrBand.isNotBlank()) {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("NR Band", style = MaterialTheme.typography.labelMedium)
+                        Text(
+                            "n$nrBand",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        if (nrSignal.carrierAggregation.isNotBlank()) {
+                            Text(
+                                "CA: ${nrSignal.sccCarriers.size} SCC",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
                 }
@@ -218,9 +380,7 @@ private fun DashboardCard(
         onClick = onClick ?: {},
         enabled = onClick != null,
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-        ) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     icon,
@@ -251,7 +411,7 @@ private fun DashboardCard(
     }
 }
 
-private fun rsrpColor(rsrp: Int?): Color {
+private fun rsrpColor(rsrp: Double?): Color {
     if (rsrp == null) return Color.Unspecified
     return when {
         rsrp >= -80 -> Color(0xFF4CAF50)
@@ -261,7 +421,7 @@ private fun rsrpColor(rsrp: Int?): Color {
     }
 }
 
-private fun signalQualityLabel(rsrp: Int?): String {
+private fun signalQualityLabel(rsrp: Double?): String {
     if (rsrp == null) return "No signal"
     return when {
         rsrp >= -80 -> "Excellent"
@@ -276,5 +436,17 @@ private fun batteryColor(capacity: Int): Color {
         capacity > 50 -> Color(0xFF4CAF50)
         capacity > 20 -> Color(0xFFFF9800)
         else -> Color(0xFFF44336)
+    }
+}
+
+private fun formatUptime(seconds: Int): String {
+    if (seconds <= 0) return ""
+    val days = seconds / 86400
+    val hours = (seconds % 86400) / 3600
+    val mins = (seconds % 3600) / 60
+    return when {
+        days > 0 -> "${days}d ${hours}h"
+        hours > 0 -> "${hours}h ${mins}m"
+        else -> "${mins}m"
     }
 }

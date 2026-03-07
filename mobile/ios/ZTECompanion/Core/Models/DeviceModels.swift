@@ -143,12 +143,12 @@ enum DeviceParser {
         )
     }
 
-    static func parseCharger(_ data: [String: Any], into battery: inout BatteryStatus) {
+    static func parseCharger(_ data: [String: Any], into battery: inout BatteryStatus, chargeControl: [String: Any]? = nil) {
         battery.chargeStatus = asInt(data["charge_status"]) ?? 0
         let chargerConnected = asInt(data["charger_connect"]) == 1
-        let directPower = (data["direct_power_supply_mode"] as? String ?? "").lowercased()
-        if chargerConnected && (directPower == "enable" || directPower == "1") {
-            battery.charging = "wall"
+        let chargingStopped = chargeControl?["charging_stopped"] as? Bool ?? false
+        if chargerConnected && chargingStopped {
+            battery.charging = "stopped"
         } else if battery.chargeStatus == 1 {
             battery.charging = "charging"
         } else {
@@ -515,18 +515,15 @@ enum DeviceParser {
 
     static func speedComponents(_ bytesPerSec: Double) -> FormattedValue {
         let bits = bytesPerSec * 8.0
-        let tb = 1024.0 * 1024.0 * 1024.0 * 1024.0
-        let gb = 1024.0 * 1024.0 * 1024.0
-        let mb = 1024.0 * 1024.0
-        let kb = 1024.0
+        let gb = 1_000_000_000.0
+        let mb = 1_000_000.0
+        let kb = 1_000.0
         let (raw, unit): (Double, String)
-        if bits >= tb { (raw, unit) = (bits / tb, " Tb/s") }
-        else if bits >= gb { (raw, unit) = (bits / gb, " Gb/s") }
+        if bits >= gb { (raw, unit) = (bits / gb, " Gb/s") }
         else if bits >= mb { (raw, unit) = (bits / mb, " Mb/s") }
         else if bits >= kb { (raw, unit) = (bits / kb, " Kb/s") }
         else { (raw, unit) = (bits, " b/s") }
-        let dp = adaptiveDecimals(raw)
-        return FormattedValue(number: roundTo(raw, decimals: dp), unit: unit, decimalPlaces: dp)
+        return FormattedValue(number: roundTo(raw, decimals: 1), unit: unit, decimalPlaces: 1)
     }
 
     static func bytesComponents(_ bytes: UInt64) -> FormattedValue {

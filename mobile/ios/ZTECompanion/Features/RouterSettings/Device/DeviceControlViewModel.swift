@@ -8,10 +8,12 @@ final class DeviceControlViewModel {
     var messageIsError: Bool = false
     var showRebootConfirm: Bool = false
     var showFactoryResetConfirm: Bool = false
-    var powerSupplyEnabled: Bool = false
+    var chargeLimitEnabled: Bool = false
+    var chargeLimit: Int = 100
+    var hysteresis: Int = 5
     var powerSaveEnabled: Bool = false
     var fastBootEnabled: Bool = false
-    private var powerSupplyLoaded: Bool = false
+    private var chargeControlLoaded: Bool = false
     private var powerSaveLoaded: Bool = false
     private var fastBootLoaded: Bool = false
     private let client: AgentClient
@@ -24,45 +26,78 @@ final class DeviceControlViewModel {
 
     func refresh() async {
         do {
-            let data = try await client.getJSON("/api/device/charger")
-            let mode = (data["direct_power_supply_mode"] as? String ?? "").lowercased()
-            if !mode.isEmpty {
-                let newPowerSupply = (mode == "enable" || mode == "1")
-                if newPowerSupply != powerSupplyEnabled { powerSupplyEnabled = newPowerSupply }
+            let resp = try await client.getJSON("/api/device/charge-control")
+            let data = resp["data"] as? [String: Any] ?? resp
+            if let enabled = data["charge_limit_enabled"] as? Bool {
+                chargeLimitEnabled = enabled
             }
-            powerSupplyLoaded = true
+            if let limit = data["charge_limit"] as? Int {
+                chargeLimit = limit
+            }
+            if let hyst = data["hysteresis"] as? Int {
+                hysteresis = hyst
+            }
+            chargeControlLoaded = true
         } catch {
-            showMessage("Failed to load power supply status", isError: true)
+            showMessage("Failed to load charge control status", isError: true)
         }
 
         do {
-            let psData = try await client.postJSON("/api/device/power-save", body: ["deviceInfoList": ["power_saver_mode", "quicken_power_on"]])
+            let psData = try await client.postJSON("/api/device/power-save", body: ["deviceInfoList": ["power_saver_mode"]])
             let psMode = psData["power_saver_mode"] as? String ?? ""
             if !psMode.isEmpty {
                 let newPowerSave = (psMode == "1")
                 if newPowerSave != powerSaveEnabled { powerSaveEnabled = newPowerSave }
             }
             powerSaveLoaded = true
+        } catch {
+            showMessage("Failed to load power-save settings", isError: true)
+        }
 
-            let fbMode = psData["quicken_power_on"] as? String ?? ""
+        do {
+            let fbData = try await client.getJSON("/api/device/fast-boot")
+            let data = fbData["data"] as? [String: Any] ?? fbData
+            let fbMode = data["fast_boot"] as? String ?? ""
             if !fbMode.isEmpty {
                 let newFastBoot = (fbMode == "1")
                 if newFastBoot != fastBootEnabled { fastBootEnabled = newFastBoot }
             }
             fastBootLoaded = true
         } catch {
-            showMessage("Failed to load device manager settings", isError: true)
+            showMessage("Failed to load fast boot settings", isError: true)
         }
     }
 
-    func setPowerSupply(enabled: Bool) async {
-        guard powerSupplyLoaded else { return }
+    func setChargeLimit(enabled: Bool, limit: Int, hysteresis: Int? = nil) async {
+        guard chargeControlLoaded else { return }
+        let prevEnabled = chargeLimitEnabled
+        let prevLimit = chargeLimit
+        let prevHysteresis = self.hysteresis
         isLoading = true
         do {
-            let _ = try await client.putJSON("/api/device/power-supply", body: ["direct_power_supply_mode": enabled ? "enable" : "disable"])
-            showMessage(enabled ? "Power supply mode enabled" : "Power supply mode disabled", isError: false)
+            var body: [String: Any] = [
+                "charge_limit_enabled": enabled,
+                "charge_limit": limit,
+            ]
+            if let hyst = hysteresis {
+                body["hysteresis"] = hyst
+            }
+            let resp = try await client.putJSON("/api/device/charge-control", body: body)
+            let data = (resp["data"] as? [String: Any]) ?? resp
+            if let newEnabled = data["charge_limit_enabled"] as? Bool {
+                chargeLimitEnabled = newEnabled
+            }
+            if let newLimit = data["charge_limit"] as? Int {
+                chargeLimit = newLimit
+            }
+            if let newHyst = data["hysteresis"] as? Int {
+                self.hysteresis = newHyst
+            }
+            showMessage(enabled ? "Charge limit set to \(limit)%" : "Charge limit disabled", isError: false)
         } catch {
-            powerSupplyEnabled = !enabled
+            chargeLimitEnabled = prevEnabled
+            chargeLimit = prevLimit
+            self.hysteresis = prevHysteresis
             showMessage("Failed: \(error.localizedDescription)", isError: true)
         }
         isLoading = false
@@ -85,7 +120,7 @@ final class DeviceControlViewModel {
         guard fastBootLoaded else { return }
         isLoading = true
         do {
-            let _ = try await client.putJSON("/api/device/power-save", body: ["deviceInfoList": ["quicken_power_on": enabled ? "1" : "0"]])
+            let _ = try await client.putJSON("/api/device/fast-boot", body: ["fast_boot": enabled ? "1" : "0"])
             showMessage(enabled ? "Fast boot enabled" : "Fast boot disabled", isError: false)
         } catch {
             fastBootEnabled = !enabled

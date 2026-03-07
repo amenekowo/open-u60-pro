@@ -5,12 +5,15 @@ use tiny_http::{Header, Method, Request, Response, Server};
 
 use crate::cell;
 use crate::device_ext;
+use crate::lan_test;
+use crate::scheduler;
 use crate::handlers::{self, AppState};
 use crate::modem_ext;
 use crate::network_ext;
 use crate::router;
 use crate::sim;
 use crate::sms;
+use crate::speedtest;
 use crate::telephony;
 use crate::usb;
 use crate::wifi;
@@ -56,13 +59,9 @@ pub fn start(bind: &str, threads: usize, state: Arc<AppState>) {
 
 fn handle_request(mut request: Request, state: &AppState) {
     let method = request.method().clone();
-    let path = request.url().to_string();
-    // Strip query string
-    let path = path.split('?').next().unwrap_or(&path);
-
-    // Read body
-    let mut body = Vec::new();
-    let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body);
+    let url = request.url().to_string();
+    // Strip query string for routing
+    let path = url.split('?').next().unwrap_or(&url);
 
     // Auth check — skip for login endpoint
     let needs_auth = path != "/api/auth/login";
@@ -83,11 +82,43 @@ fn handle_request(mut request: Request, state: &AppState) {
         }
     }
 
+    // LAN test: download streams raw bytes, upload reads body incrementally.
+    // Handle BEFORE the body is fully read into memory.
+    match (&method, path) {
+        (&Method::Get, "/api/lan/download") => {
+            let size = parse_query_usize(&url, "size").unwrap_or(50 * 1024 * 1024);
+            let size = size.min(200 * 1024 * 1024); // cap at 200 MB
+            lan_test::download(request, size);
+            return;
+        }
+        (&Method::Post, "/api/lan/upload") => {
+            let (status, body_json) = lan_test::upload(&mut request);
+            respond(request, status, body_json);
+            return;
+        }
+        _ => {}
+    }
+
+    // Read body
+    let mut body = Vec::new();
+    let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body);
+
     let (status, body_json) = route(&method, path, state, &body);
     respond(request, status, body_json);
 }
 
-fn route(method: &Method, path: &str, state: &AppState, body: &[u8]) -> (u16, Value) {
+fn parse_query_usize(url: &str, key: &str) -> Option<usize> {
+    let query = url.split('?').nth(1)?;
+    for pair in query.split('&') {
+        let mut kv = pair.splitn(2, '=');
+        if kv.next()? == key {
+            return kv.next()?.parse().ok();
+        }
+    }
+    None
+}
+
+pub fn route(method: &Method, path: &str, state: &AppState, body: &[u8]) -> (u16, Value) {
     match (method, path) {
         // Auth
         (&Method::Post, "/api/auth/login") => handlers::login(state, body),
@@ -113,15 +144,19 @@ fn route(method: &Method, path: &str, state: &AppState, body: &[u8]) -> (u16, Va
         (&Method::Get, "/api/device/system") => device_ext::device_system(state),
         (&Method::Post, "/api/device/reboot") => device_ext::device_reboot(state),
         (&Method::Post, "/api/device/factory-reset") => device_ext::device_factory_reset(state),
-        (&Method::Put, "/api/device/power-supply") => device_ext::device_power_supply_set(state, body),
+        (&Method::Get, "/api/device/charge-control") => device_ext::charge_control_get(state),
+        (&Method::Put, "/api/device/charge-control") => device_ext::charge_control_set(state, body),
         (&Method::Post, "/api/device/power-save") => device_ext::device_power_save_get(state, body),
         (&Method::Put, "/api/device/power-save") => device_ext::device_power_save_set(state, body),
+        (&Method::Get, "/api/device/fast-boot") => device_ext::device_fast_boot_get(state),
+        (&Method::Put, "/api/device/fast-boot") => device_ext::device_fast_boot_set(state, body),
         // WiFi
         (&Method::Get, "/api/wifi/status") => wifi::wifi_status(state),
         (&Method::Put, "/api/wifi/settings") => wifi::wifi_set(state, body),
         (&Method::Get, "/api/wifi/guest") => wifi::guest_status(state),
         (&Method::Put, "/api/wifi/guest") => wifi::guest_set(state, body),
         // Modem
+        (&Method::Get, "/api/data-usage") => handlers::data_usage(state),
         (&Method::Get, "/api/modem/status") => handlers::modem_status(state),
         (&Method::Post, "/api/modem/online") => handlers::modem_online(state),
         (&Method::Get, "/api/modem/data") => modem_ext::modem_data_get(state),
@@ -222,6 +257,19 @@ fn route(method: &Method, path: &str, state: &AppState, body: &[u8]) -> (u16, Va
         (&Method::Post, "/api/doh/disable") => doh_disable(state),
         (&Method::Get, "/api/doh/cache") => doh_cache_list(state),
         (&Method::Post, "/api/doh/cache/clear") => doh_cache_clear(state),
+        // LAN test (download/upload handled above before body read)
+        (&Method::Get, "/api/lan/ping") => lan_test::ping(),
+        // Speed test
+        (&Method::Get, "/api/speedtest/servers") => speedtest::servers(state),
+        (&Method::Post, "/api/speedtest/start") => speedtest::start(state, body),
+        (&Method::Get, "/api/speedtest/progress") => speedtest::progress(state),
+        (&Method::Post, "/api/speedtest/stop") => speedtest::stop(state, body),
+        // Scheduler
+        (&Method::Get, "/api/scheduler/jobs") => scheduler::jobs_list(state),
+        (&Method::Post, "/api/scheduler/jobs") => scheduler::jobs_create(state, body),
+        (&Method::Put, "/api/scheduler/jobs") => scheduler::jobs_update(state, body),
+        (&Method::Delete, "/api/scheduler/jobs") => scheduler::jobs_delete(state, body),
+        (&Method::Put, "/api/scheduler/jobs/toggle") => scheduler::jobs_toggle(state, body),
         // Fallback
         _ => (404, json!({"ok": false, "error": "not found"})),
     }

@@ -12,9 +12,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.ztecompanion.core.network.AgentClient
+import com.ztecompanion.core.network.AgentError
 import com.ztecompanion.core.network.AuthState
 import com.ztecompanion.core.network.AuthManager
-import com.ztecompanion.core.network.UbusClient
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -22,13 +23,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import javax.inject.Inject
 
 @HiltViewModel
 class EnableADBViewModel @Inject constructor(
-    private val ubusClient: UbusClient,
+    private val agentClient: AgentClient,
     private val authManager: AuthManager,
 ) : ViewModel() {
 
@@ -49,9 +48,11 @@ class EnableADBViewModel @Inject constructor(
             _error.value = null
             _success.value = false
             try {
-                val params = buildJsonObject { put("mode", "debug") }
-                ubusClient.call("zwrt_bsp.usb", "set", params)
+                agentClient.putJSON("/api/device/usb/mode", mapOf("mode" to "debug"))
                 _success.value = true
+            } catch (e: AgentError.Unauthorized) {
+                if (authManager.reauthenticate()) enableADB()
+                else _error.value = e.message
             } catch (e: Exception) {
                 _error.value = e.message
             } finally {

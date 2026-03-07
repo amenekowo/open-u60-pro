@@ -15,7 +15,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.ztecompanion.core.model.ConnectedClient
+import com.ztecompanion.core.model.ConnectedDevice
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -73,7 +73,7 @@ fun ClientsScreen(
 }
 
 @Composable
-private fun ClientCard(client: ConnectedClient) {
+private fun ClientCard(client: ConnectedDevice) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.padding(16.dp),
@@ -87,26 +87,25 @@ private fun ClientCard(client: ConnectedClient) {
             )
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                val displayName = client.name.ifBlank { client.hostname.ifBlank { "Unknown" } }
                 Text(
-                    displayName,
+                    client.displayName,
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Medium,
                 )
                 Text(
-                    client.ip.ifBlank { "--" },
+                    client.ipAddress.ifBlank { "--" },
                     style = MaterialTheme.typography.bodyMedium,
                     fontFamily = FontFamily.Monospace,
                 )
                 Text(
-                    client.mac,
+                    client.macAddress,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontFamily = FontFamily.Monospace,
                 )
-                if (client.ip6.isNotBlank()) {
+                client.ip6Addresses.firstOrNull()?.let { ip6 ->
                     Text(
-                        client.ip6,
+                        ip6,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontFamily = FontFamily.Monospace,

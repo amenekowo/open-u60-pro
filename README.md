@@ -63,6 +63,25 @@ A lightweight Rust HTTP server that runs directly on the router (port 9090, LAN-
 cargo build --release --target aarch64-unknown-linux-musl -p zte-agent
 ```
 
+**131 endpoints across 14 categories:**
+
+| Category | # | Capabilities |
+|---|---|---|
+| Device | 14 | System info, battery, CPU, memory, thermal, charger, charge control, reboot, factory reset, power save |
+| Network | 9 | Signal strength (RSRP/SINR/RSRQ), speed, traffic stats, WAN/LAN status, rmnet, connected clients |
+| Modem | 12 | Airplane mode, mobile data toggle, network mode (2G-5G), operator scan, manual registration |
+| SMS | 5 | List, send, delete, mark read, storage capacity |
+| SIM | 7 | SIM info, IMEI, PIN management, PUK unlock |
+| Cell/Band | 19 | NR/LTE band locking, cell locking, neighbor scan, STC, signal quality detection |
+| Router | 29 | DNS, LAN/DHCP, firewall, NAT, DMZ, UPnP, port forwarding, QoS, domain filter, APN profiles, VPN/ALG |
+| WiFi | 4 | Status, SSID/password/channel/TX power, guest WiFi |
+| USB | 3 | USB mode switching, powerbank control |
+| Telephony | 11 | Voice calls (dial/hangup/answer/DTMF/mute), USSD codes, SIM Toolkit menus |
+| Speed Test | 4 | Server list, run test, progress tracking |
+| DoH Proxy | 6 | DNS-over-HTTPS proxy, cache management |
+| LAN Test | 3 | WiFi ping, download/upload throughput measurement |
+| Scheduler | 5 | Scheduled/recurring jobs for any API action |
+
 ### Mobile Companion Apps
 
 Native apps that connect directly over WiFi -- no computer needed.
@@ -72,9 +91,36 @@ Native apps that connect directly over WiFi -- no computer needed.
 | **Framework** | SwiftUI | Jetpack Compose |
 | **Min Version** | iOS 16.0 | Android 8.0 (API 26) |
 | **Dependencies** | None (Apple frameworks only) | OkHttp, Hilt, Vico, kotlinx.serialization |
-| **Features** | BandLock, Call, Clients, Config, Dashboard, DeviceInfo, Login, RouterSettings, Signal, SIM/STK/USSD, SMS, Tools, USBMode | BandLock, Clients, Config, Dashboard, DeviceInfo, Login, Settings, Signal, Tools |
-| **Tabs** | Dashboard, SMS, Tools, Router, Settings | Dashboard, Signal, Settings |
-| **Path** | `mobile/ios/ZTECompanion/` (96 Swift files) | `mobile/android/ZTECompanion/` (32 Kotlin files) |
+| **Features** | BandLock, Call, Clients, Config, Dashboard, DeviceInfo, Login, RouterSettings, Scheduler, Signal, SIM/STK/USSD, SMS, Tools, USBMode | BandLock, Clients, Config, Dashboard, DeviceInfo, Login, RouterSettings, Scheduler, Signal, SIM/STK, SMS, Tools, USBMode |
+| **Tabs** | Dashboard, SMS, Tools, Router, Settings | Dashboard, SMS, Tools, Router, Settings |
+| **Path** | `mobile/ios/ZTECompanion/` (109 Swift files) | `mobile/android/ZTECompanion/` (90 Kotlin files) |
+
+## Why Use This Instead of the Official ZTE App?
+
+The stock ZTE U60 Pro runs **49 proprietary daemons** consuming **233 MB of RAM** just for device management. Many of these are unnecessary (TR-069 remote management, MQTT telemetry, Samba, NFC, diagnostics) and phone home to ZTE servers.
+
+`zte-agent` replaces the need for the official ZTE management app with a single 2 MB binary:
+
+| | zte-agent | ZTE Official Stack |
+|---|---|---|
+| **Processes** | 1 | 49 |
+| **Memory (RSS)** | 1.5 MB | 233 MB |
+| **Binary size** | 2 MB | ~50+ MB combined |
+| **Threads** | 12 | ~130+ |
+| **Telemetry** | None | Phones home to `iot.zte.com.cn` etc. |
+| **App** | Open-source native iOS/Android | Closed-source, Chinese-only |
+
+The official ZTE stack's top memory consumers:
+
+| Process | RAM | Purpose |
+|---------|-----|---------|
+| `zte_topsw_devui` | 22.8 MB | LCD UI daemon |
+| `zte_topsw_get_brand` | 14.2 MB | Carrier branding |
+| `zte_topsw_data` | 10.9 MB | Mobile data management |
+| `zte_topsw_tr069` + subs | 23.2 MB | ISP remote management |
+| `zte_topsw_diag` | 7.1 MB | Diagnostics/logging |
+
+zte-agent provides equivalent API access to the same underlying ubus/AT services using **0.65% of the memory** -- freeing ~230 MB of RAM for actual routing and WiFi workloads.
 
 ## Device Impact
 
@@ -84,11 +130,12 @@ Native apps that connect directly over WiFi -- no computer needed.
 ### Filesystem Layout
 
 ```
-/data/local/tmp/                    (writable /data partition)
+/data/                              (writable /data partition)
 ├── zte-agent                       <- on-device REST agent
-├── start_zte_agent.sh              <- agent boot script
-├── dropbear                        <- SSH binary (if installed)
-└── start_ssh.sh                    <- SSH boot script (if installed)
+└── local/tmp/
+    ├── start_zte_agent.sh          <- agent boot script
+    ├── dropbear                    <- SSH binary (if installed)
+    └── start_ssh.sh               <- SSH boot script (if installed)
 
 /etc/                               (read-only rootfs)
 ├── rc.local                        <- boot hooks appended here
@@ -108,23 +155,45 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 # 2. Add musl cross-compilation target
 rustup target add aarch64-unknown-linux-musl
 
-# 3. Build the agent
+# 3. Install musl cross-linker
+# macOS:
+brew install filosottile/musl-cross/musl-cross
+# Ubuntu/Debian:
+sudo apt install musl-tools gcc-aarch64-linux-gnu
+
+# 4. Install ADB
+# macOS:
+brew install android-platform-tools
+# Ubuntu/Debian:
+sudo apt install android-tools-adb
+
+# 5. Build the agent
 cargo build --release --target aarch64-unknown-linux-musl -p zte-agent
 ```
 
-### Deploy Agent
+### First-Time Setup
 
-Push the binary to the device via ADB or SCP, then start it:
+For a factory-fresh device that has never had zte-agent installed:
+
+**Option A -- Browser (no tools needed)**
+
+Visit [open-u60-pro.vercel.app](https://open-u60-pro.vercel.app), enter your router password and desired agent password, connect USB, and click Deploy. Requires Chrome or Edge.
+
+**Option B -- Command line**
 
 ```bash
-# Via ADB
-adb push target/aarch64-unknown-linux-musl/release/zte-agent /data/local/tmp/
-adb shell "ZTE_AGENT_PASSWORD=yourpassword /data/local/tmp/zte-agent &"
-
-# Via SCP (if SSH is installed)
-scp -P 2222 target/aarch64-unknown-linux-musl/release/zte-agent root@192.168.0.1:/data/local/tmp/
-ssh -p 2222 root@192.168.0.1 "ZTE_AGENT_PASSWORD=yourpassword /data/local/tmp/zte-agent &"
+./setup.sh <router-password> <agent-password>
 ```
+
+Enables ADB, builds and pushes the agent, creates boot scripts, and optionally sets up SSH for wireless deploys.
+
+### Deploy Agent (subsequent updates)
+
+```bash
+./deploy.sh yourpassword
+```
+
+This builds, deploys the binary to the device via SSH (port 2222), updates the boot password, and restarts the agent.
 
 ### Connect Mobile App
 
@@ -172,6 +241,7 @@ u60-Pro-rs/
     │   │   │   ├── Telemetry/ Telemetry blocking
     │   │   │   ├── VPN/       VPN settings
     │   │   │   └── WiFi/      WiFi configuration
+    │   │   ├── Scheduler/     Scheduled/recurring jobs
     │   │   ├── Settings/      App settings
     │   │   ├── Signal/        Signal monitor
     │   │   ├── SMS/           SMS compose/read/conversations
@@ -181,8 +251,12 @@ u60-Pro-rs/
     └── android/ZTECompanion/  Jetpack Compose app
         ├── core/              Network, crypto, models, DI
         ├── feature/           bandlock, clients, config, dashboard,
-        │                      deviceinfo, login, settings, signal, tools
+        │                      deviceinfo, login, router, scheduler,
+        │                      settings, signal, sms, tools, usb
         └── navigation/        NavHost + bottom bar
+
+├── web/                       WebUSB bootstrap tool (open-u60-pro.vercel.app)
+│   └── index.html             Single-page setup wizard
 ```
 
 ## Signal Thresholds
@@ -192,42 +266,6 @@ u60-Pro-rs/
 | **RSRP** (dBm) | >= -80 | >= -100 | >= -110 | < -110 |
 | **SINR** (dB) | >= 20 | >= 10 | >= 0 | < 0 |
 | **RSRQ** (dB) | >= -10 | >= -15 | >= -20 | < -20 |
-
-## ZTE Telemetry Domains
-
-The following domains are blocked by the telemetry blocker:
-
-```
-iot.zte.com.cn          mifi.zte.com.cn         update.zte.com.cn
-cpe.zte.com.cn          fota.zte.com.cn         push.zte.com.cn
-log.zte.com.cn          report.zte.com.cn       cloud.zte.com.cn
-ztedevices.com          www.ztedevices.com       support.ztedevices.com
-```
-
-## Technical Notes
-
-- Device ID reports as `MU5120ZTED0000000` (not MU5250)
-- Anonymous session token: `00000000000000000000000000000000` (32 zeros)
-- AT serial device: `/dev/at_mdm0` (requires background-cat read method)
-- No dropbear/sshd pre-installed; can be deployed manually via ADB
-- Session tokens expire after ~5 minutes; the agent auto-retries
-- WiFi 5GHz radio: Qualcomm WCN7851, 21 dBm (~126 mW) at 40% power, EHT160 (WiFi 7); `txpowerpercent` adjustable 10-100% in UCI
-- **CPU**: OpenWrt target says `aarch64_cortex-a53` but CPU part `0xd05` variant `0x2` = Cortex-A55 (ARMv8.2-A). Frequencies: 691 MHz - 2.2 GHz
-- **Board**: Device-tree model `Qualcomm Technologies, Inc. SDXPINN IDP MBB`, board `qcom,sdxpinn-idp`
-- **eMMC**: Longsys `JS08AC`, manufacturer ID `0x0000f2`, 8 GB (7,389,184 blocks)
-- **Boot**: A/B partition scheme (`SLOT_SUFFIX=_a`), SELinux enforcing
-- **Battery model**: `7527761_ZTE_MU5250_HIGHPOWER_10000MAH_PM7550B` (design capacity 10,214 uAh)
-- **Thermal**: 40 thermal zones -- CPU (cpuss-0..3), modem (mdmss-0..2, mdmq6-0), mmWave (mmw0..3), PMICs (pmx75, pm7550ba, pmg1110), USB, battery, ethphy
-- **AI partition**: `/ai_app` (365 MB) contains `xDpi_SigLibSoft.bin` (signal processing model)
-- **WiFi driver**: `qcacld32` (Qualcomm Connected Audio/Lighting/Data 3.2)
-- **Firmware build**: `BD_CNMU5250V1.0.0B27`, integrated `CN_ZTE_MU5250V1.0.0B27`, build date Oct 31 2025
-- **Display panel**: Sitronix ST77926 IPS LCD, 320x480 pixels, RGB565 (16-bit color)
-- **Display rendering**: No framebuffer (`/dev/fb0` absent) -- DRM/KMS only (`/dev/dri/card0`); LVGL UI toolkit with FreeType + LodePNG
-- **Display assets**: PNG skins/animations/icons/fonts at `/usr/ui/`; UI daemon `zte_topsw_devui`, LED daemon `zte_topsw_led`
-- **Display debug**: `/sys/kernel/debug/qpic_display/draw` (write-only), `image_dump`; daemon can snapshot to `/cache/fb.png`
-- **Backlight controller**: AWINIC AW9523B at I2C `1-005b`; touch controller Sitronix at I2C `1-0055` -> `/dev/input/event3`
-- **Charge policy**: sysfs `ui_chg_policy_mode` (0-5), targets SOC range; mode 5 = 80-100%
-- **Wall mode**: `zwrt_bsp.charger set direct_power_supply_mode` -- direct power bypass, battery not used
 
 ## License & Disclaimers
 

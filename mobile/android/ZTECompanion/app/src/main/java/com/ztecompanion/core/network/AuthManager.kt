@@ -21,7 +21,7 @@ enum class AuthState {
 @Singleton
 class AuthManager @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val ubusClient: UbusClient,
+    private val agentClient: AgentClient,
 ) {
     private val _authState = MutableStateFlow(AuthState.LOGGED_OUT)
     val authState: StateFlow<AuthState> = _authState.asStateFlow()
@@ -61,6 +61,7 @@ class AuthManager @Inject constructor(
 
     fun detectGateway(): String {
         try {
+            @Suppress("DEPRECATION")
             val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
             val dhcpInfo = wifiManager?.dhcpInfo
             if (dhcpInfo != null && dhcpInfo.gateway != 0) {
@@ -76,21 +77,24 @@ class AuthManager @Inject constructor(
         return if (saved.isNotBlank()) saved else detectGateway()
     }
 
+    fun resolveBaseURL(): String = "http://${resolveGateway()}:9090"
+
     suspend fun login(password: String): Result<String> {
         _authState.value = AuthState.LOGGING_IN
         _errorMessage.value = null
-        ubusClient.updateGateway(resolveGateway())
+        agentClient.baseURL = resolveBaseURL()
         return try {
-            val session = ubusClient.login(password)
+            val token = agentClient.login(password)
             _authState.value = AuthState.LOGGED_IN
             savedPassword = password
-            Result.success(session)
-        } catch (e: UbusError) {
+            Result.success(token)
+        } catch (e: AgentError) {
             _authState.value = AuthState.ERROR
             _errorMessage.value = when (e) {
-                is UbusError.AuthError -> e.message
-                is UbusError.NetworkError -> "Connection failed: ${e.message}"
-                is UbusError.TimeoutError -> "Connection timed out"
+                is AgentError.Unauthorized -> "Invalid password"
+                is AgentError.ServerUnreachable -> "Cannot reach agent — is it running on port 9090?"
+                is AgentError.Timeout -> "Connection timed out"
+                is AgentError.NetworkError -> "Connection failed: ${e.message}"
                 else -> e.message
             }
             Result.failure(e)
@@ -107,8 +111,21 @@ class AuthManager @Inject constructor(
         return login(password).isSuccess
     }
 
+    suspend fun reauthenticate(): Boolean {
+        val password = savedPassword
+        if (password.isBlank()) return false
+        agentClient.baseURL = resolveBaseURL()
+        return try {
+            agentClient.login(password)
+            _authState.value = AuthState.LOGGED_IN
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     fun logout() {
-        ubusClient.clearSession()
+        agentClient.token = null
         _authState.value = AuthState.LOGGED_OUT
         _errorMessage.value = null
     }

@@ -1,7 +1,11 @@
+use std::sync::Arc;
+
 use serde_json::{json, Value};
 
 use crate::at_cmd::AtPort;
 use crate::auth::AuthState;
+use crate::charge_policy::ChargeLimitEnforcer;
+use crate::scheduler::Scheduler;
 use crate::system::{self, CpuTracker, SpeedTracker};
 use crate::ubus;
 
@@ -11,6 +15,9 @@ pub struct AppState {
     pub speed: SpeedTracker,
     pub at_port: AtPort,
     pub doh: std::sync::Arc<crate::doh::DohProxy>,
+    pub scheduler: Arc<Scheduler>,
+    pub speedtest: crate::speedtest::SpeedTest,
+    pub charge_limit: Arc<ChargeLimitEnforcer>,
 }
 
 impl AppState {
@@ -21,6 +28,9 @@ impl AppState {
             speed: SpeedTracker::new(),
             at_port: AtPort::new(),
             doh: std::sync::Arc::new(crate::doh::DohProxy::new()),
+            scheduler: Arc::new(Scheduler::new()),
+            speedtest: crate::speedtest::SpeedTest::new(),
+            charge_limit: Arc::new(ChargeLimitEnforcer::new()),
         }
     }
 }
@@ -109,6 +119,40 @@ pub fn modem_status(_state: &AppState) -> (u16, Value) {
         Ok(mode) => (200, json!({"ok": true, "data": {"operate_mode": mode}})),
         Err(e) => (503, json!({"ok": false, "error": e})),
     }
+}
+
+/// GET /api/data-usage
+pub fn data_usage(_state: &AppState) -> (u16, Value) {
+    let section = "zwrt_data_commit.wwancid1dst";
+
+    let read_period = |prefix: &str| -> Value {
+        let get = |suffix: &str| -> Value {
+            let key = format!("{section}.{prefix}_{suffix}");
+            match ubus::uci_get(&key) {
+                Ok(v) => v.parse::<u64>().map(Value::from).unwrap_or(Value::from(v)),
+                Err(_) => Value::Null,
+            }
+        };
+        json!({
+            "tx_bytes": get("tx_bytes"),
+            "rx_bytes": get("rx_bytes"),
+            "time_secs": get("time"),
+            "tx_packets": get("tx_packets"),
+            "rx_packets": get("rx_packets"),
+        })
+    };
+
+    (
+        200,
+        json!({
+            "ok": true,
+            "data": {
+                "day": read_period("day"),
+                "month": read_period("month"),
+                "total": read_period("total"),
+            }
+        }),
+    )
 }
 
 /// POST /api/modem/online

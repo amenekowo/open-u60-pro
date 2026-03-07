@@ -3,51 +3,69 @@ package com.ztecompanion.feature.dashboard
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ztecompanion.core.model.*
+import com.ztecompanion.core.network.AgentClient
+import com.ztecompanion.core.network.AgentError
 import com.ztecompanion.core.network.AuthManager
 import com.ztecompanion.core.network.AuthState
-import com.ztecompanion.core.network.UbusClient
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.*
 import javax.inject.Inject
-
-data class DashboardState(
-    val signal: SignalSnapshot = SignalSnapshot(),
-    val battery: BatteryStatus = BatteryStatus(),
-    val thermal: ThermalStatus = ThermalStatus(),
-    val traffic: TrafficStats = TrafficStats(),
-    val clientCount: Int = 0,
-    val isLoading: Boolean = false,
-    val error: String? = null,
-)
 
 @HiltViewModel
 class DashboardViewModel @Inject constructor(
-    private val ubusClient: UbusClient,
+    private val client: AgentClient,
     private val authManager: AuthManager,
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow(DashboardState())
-    val state: StateFlow<DashboardState> = _state.asStateFlow()
+    // Signal
+    val nrSignal = MutableStateFlow(NRSignal.empty)
+    val lteSignal = MutableStateFlow(LTESignal.empty)
+    val operatorInfo = MutableStateFlow(OperatorInfo.empty)
 
-    val authState = authManager.authState
+    // Device
+    val battery = MutableStateFlow(BatteryStatus.empty)
+    val thermal = MutableStateFlow(ThermalStatus.empty)
+    val systemInfo = MutableStateFlow(SystemInfo.empty)
+
+    // Traffic
+    val speed = MutableStateFlow(TrafficSpeed.zero)
+    val trafficStats = MutableStateFlow(TrafficStats.empty)
+
+    // Network
+    val wanIPv4 = MutableStateFlow("")
+    val wanIPv6 = MutableStateFlow("")
+    val wifiStatus = MutableStateFlow(WifiStatus.empty)
+    val connectedDevices = MutableStateFlow<List<ConnectedDevice>>(emptyList())
+
+    // Status flags
+    val isAirplaneMode = MutableStateFlow(false)
+    val isMobileDataOff = MutableStateFlow(false)
+    val simPinRequired = MutableStateFlow(false)
+    val simPukRequired = MutableStateFlow(false)
+
+    // UI state
+    val isLoading = MutableStateFlow(false)
+    val error = MutableStateFlow<String?>(null)
+    val lastUpdated = MutableStateFlow(0L)
+
+    val authState: StateFlow<AuthState> = authManager.authState
 
     private var pollingJob: Job? = null
-    private var prevRxBytes: Long = 0
-    private var prevTxBytes: Long = 0
-    private var prevTimestamp: Long = 0
-    private var prevSource: String = ""
+    private var previousTraffic = TrafficStats.empty
+    private var cpuCores = 1
 
     init {
         viewModelScope.launch {
-            authManager.authState.collect { authState ->
-                if (authState == AuthState.LOGGED_IN) {
+            authManager.authState.collect { state ->
+                if (state == AuthState.LOGGED_IN) {
                     startPolling()
                 } else {
                     stopPolling()
@@ -79,154 +97,253 @@ class DashboardViewModel @Inject constructor(
     }
 
     private suspend fun fetchAll() {
-        _state.value = _state.value.copy(isLoading = true, error = null)
+        isLoading.value = true
+        error.value = null
         try {
-            val signal = fetchSignal()
-            val battery = fetchBattery()
-            val thermal = fetchThermal()
-            val traffic = fetchTraffic()
-            val clientCount = fetchClientCount()
-            _state.value = _state.value.copy(
-                signal = signal,
-                battery = battery,
-                thermal = thermal,
-                traffic = traffic,
-                clientCount = clientCount,
-                isLoading = false,
-            )
+            fetchSignal()
+
+            coroutineScope {
+                val batteryJob = async { fetchBattery() }
+                val thermalJob = async { fetchThermal() }
+                val trafficJob = async { fetchTraffic() }
+                val clientsJob = async { fetchClients() }
+                val wanJob = async { fetchWan() }
+                val wifiJob = async { fetchWifi() }
+                val systemJob = async { fetchSystem() }
+                val modemJob = async { fetchModemStatus() }
+                val dataJob = async { fetchMobileDataStatus() }
+                val simJob = async { fetchSimStatus() }
+
+                batteryJob.await()
+                thermalJob.await()
+                trafficJob.await()
+                clientsJob.await()
+                wanJob.await()
+                wifiJob.await()
+                systemJob.await()
+                modemJob.await()
+                dataJob.await()
+                simJob.await()
+            }
+
+            lastUpdated.value = System.currentTimeMillis()
+        } catch (e: AgentError.Unauthorized) {
+            if (authManager.reauthenticate()) {
+                try {
+                    fetchSignal()
+                } catch (_: Exception) {
+                    error.value = "Authentication failed"
+                }
+            } else {
+                error.value = "Session expired. Please log in again."
+            }
         } catch (e: Exception) {
-            _state.value = _state.value.copy(
-                isLoading = false,
-                error = e.message ?: "Unknown error",
-            )
+            error.value = e.message ?: "Unknown error"
         }
+        isLoading.value = false
     }
 
-    private suspend fun fetchSignal(): SignalSnapshot {
-        val data = ubusClient.call("zte_nwinfo_api", "nwinfo_get_netinfo") ?: return SignalSnapshot()
-        return SignalSnapshot(
-            nr = NRSignal(
-                rsrp = data["nr5g_rsrp"]?.jsonPrimitive?.intOrNull,
-                rsrq = data["nr5g_rsrq"]?.jsonPrimitive?.intOrNull,
-                sinr = data["nr5g_snr"]?.jsonPrimitive?.intOrNull,
-                rssi = data["nr5g_rssi"]?.jsonPrimitive?.intOrNull,
-                band = data["nr5g_action_band"]?.jsonPrimitive?.contentOrNull ?: "",
-                pci = data["nr5g_pci"]?.jsonPrimitive?.contentOrNull ?: "",
-                cellId = data["nr5g_cell_id"]?.jsonPrimitive?.contentOrNull ?: "",
-                arfcn = data["nr5g_action_channel"]?.jsonPrimitive?.contentOrNull ?: "",
-                bandwidth = data["nr5g_bandwidth"]?.jsonPrimitive?.contentOrNull ?: "",
-                ca = data["nrca"]?.jsonPrimitive?.contentOrNull ?: "",
-            ),
-            lte = LTESignal(
-                rsrp = data["lte_rsrp"]?.jsonPrimitive?.intOrNull,
-                rsrq = data["lte_rsrq"]?.jsonPrimitive?.intOrNull,
-                sinr = data["lte_snr"]?.jsonPrimitive?.intOrNull,
-                rssi = data["lte_rssi"]?.jsonPrimitive?.intOrNull,
-                ca = data["lteca"]?.jsonPrimitive?.contentOrNull ?: "",
-                caState = data["lteca_state"]?.jsonPrimitive?.contentOrNull ?: "",
-                caSig = data["ltecasig"]?.jsonPrimitive?.contentOrNull ?: "",
-            ),
-            wcdma = WCDMASignal(
-                rscp = data["rscp"]?.jsonPrimitive?.intOrNull,
-                ecio = data["ecio"]?.jsonPrimitive?.intOrNull,
-            ),
-            operator = OperatorInfo(
-                provider = data["network_provider"]?.jsonPrimitive?.contentOrNull ?: "",
-                networkType = data["network_type"]?.jsonPrimitive?.contentOrNull ?: "",
-                signalBar = data["signalbar"]?.jsonPrimitive?.intOrNull ?: 0,
-                roaming = data["simcard_roam"]?.jsonPrimitive?.contentOrNull ?: "",
-            ),
-        )
+    private suspend fun fetchSignal() {
+        try {
+            val data = client.getJSON("/api/network/signal")
+            val result = SignalParser.parseNetInfo(data)
+            nrSignal.value = result.nr
+            lteSignal.value = result.lte
+            operatorInfo.value = result.operatorInfo
+        } catch (e: AgentError.Unauthorized) {
+            throw e
+        } catch (_: Exception) {}
     }
 
-    private suspend fun fetchBattery(): BatteryStatus {
-        val data = ubusClient.call("zwrt_bsp.battery", "list") ?: return BatteryStatus()
-        return BatteryStatus(
-            capacity = data["battery_capacity"]?.jsonPrimitive?.intOrNull ?: 0,
-            temperature = data["battery_temperature"]?.jsonPrimitive?.intOrNull ?: 0,
-        )
+    private suspend fun fetchBattery() {
+        try {
+            val battData = client.getJSON("/api/device/battery-info")
+            var bat = DeviceParser.parseBattery(battData)
+
+            try {
+                val chargerData = client.getJSON("/api/device/charger")
+                val chargeCtrl = try { client.getJSON("/api/device/charge-control") } catch (_: Exception) { null }
+                bat = DeviceParser.parseCharger(chargerData, bat, chargeCtrl)
+            } catch (_: Exception) {}
+
+            try {
+                val rawBatt = client.getJSON("/api/battery")
+                val currentUA = DeviceParser.asInt(rawBatt["current_ua"])
+                val voltageUV = DeviceParser.asInt(rawBatt["voltage_uv"])
+                if (currentUA != null) {
+                    bat = bat.copy(currentMA = currentUA / 1000)
+                }
+                if (voltageUV != null) {
+                    bat = bat.copy(voltageMV = voltageUV / 1000)
+                }
+            } catch (_: Exception) {}
+
+            battery.value = bat
+        } catch (_: Exception) {}
     }
 
-    private suspend fun fetchThermal(): ThermalStatus {
-        val data = ubusClient.call("zwrt_bsp.thermal", "get_cpu_temp") ?: return ThermalStatus()
-        return ThermalStatus(
-            cpuTemp = data["cpuss_temp"]?.jsonPrimitive?.intOrNull ?: 0,
-        )
+    private suspend fun fetchThermal() {
+        try {
+            val data = client.getJSON("/api/device/thermal")
+            thermal.value = DeviceParser.parseThermal(data)
+        } catch (_: Exception) {}
     }
 
-    private suspend fun fetchTraffic(): TrafficStats {
-        var rxBytes: Long = 0
-        var txBytes: Long = 0
-        var source = ""
-        var precomputedRxRate: Double? = null
-        var precomputedTxRate: Double? = null
+    private suspend fun fetchTraffic() {
+        try {
+            // Tier 1: Agent-computed speed endpoint
+            try {
+                val speedData = client.getJSON("/api/network/speed")
+                val sRx = DeviceParser.asDouble(speedData["rx_bytes_per_sec"])
+                val sTx = DeviceParser.asDouble(speedData["tx_bytes_per_sec"])
+                if (sRx != null && sTx != null) {
+                    speed.value = TrafficSpeed(downloadBytesPerSec = sRx, uploadBytesPerSec = sTx)
+                }
+            } catch (_: Exception) {}
 
-        // Primary: zwrt_data get_wwandst (modem-level counters, matches router web UI)
-        val wwandst = try { ubusClient.call("zwrt_data", "get_wwandst") } catch (_: Exception) { null }
-        if (wwandst != null) {
-            val rx = wwandst["real_rx_bytes"]?.jsonPrimitive?.longOrNull
-            if (rx != null) {
-                rxBytes = rx
-                txBytes = wwandst["real_tx_bytes"]?.jsonPrimitive?.longOrNull ?: 0
-                source = "wwandst"
-                precomputedRxRate = wwandst["real_rx_speed"]?.jsonPrimitive?.doubleOrNull
-                precomputedTxRate = wwandst["real_tx_speed"]?.jsonPrimitive?.doubleOrNull
+            // Tier 2: Agent traffic endpoint (interface list)
+            try {
+                val trafficData = client.getJSON("/api/network/traffic")
+                val rxTotal = DeviceParser.asLong(trafficData["rx_bytes"])
+                val txTotal = DeviceParser.asLong(trafficData["tx_bytes"])
+                if (rxTotal != null && txTotal != null) {
+                    val current = TrafficStats(
+                        rxBytes = rxTotal, txBytes = txTotal,
+                        timestamp = System.currentTimeMillis(), source = "agent_traffic",
+                    )
+                    if (speed.value == TrafficSpeed.zero) {
+                        speed.value = DeviceParser.computeSpeed(previousTraffic, current)
+                    }
+                    trafficStats.value = current
+                    previousTraffic = current
+                    return
+                }
+            } catch (_: Exception) {}
+
+            // Tier 3: wwandst
+            try {
+                val wwData = client.getJSON("/api/network/speeds")
+                val wwTraffic = DeviceParser.parseWwandstTraffic(wwData)
+                if (wwTraffic != null) {
+                    if (speed.value == TrafficSpeed.zero) {
+                        speed.value = DeviceParser.computeSpeed(previousTraffic, wwTraffic)
+                    }
+                    trafficStats.value = wwTraffic
+                    previousTraffic = wwTraffic
+                    return
+                }
+            } catch (_: Exception) {}
+
+            // Tier 4: rmnet delta
+            try {
+                val rmData = client.getJSON("/api/network/rmnet")
+                val rxBytes = DeviceParser.asLong(rmData["rx_bytes"])
+                val txBytes = DeviceParser.asLong(rmData["tx_bytes"])
+                if (rxBytes != null && txBytes != null) {
+                    val current = TrafficStats(
+                        rxBytes = rxBytes, txBytes = txBytes,
+                        timestamp = System.currentTimeMillis(), source = "rmnet",
+                    )
+                    if (speed.value == TrafficSpeed.zero) {
+                        speed.value = DeviceParser.computeSpeed(previousTraffic, current)
+                    }
+                    trafficStats.value = current
+                    previousTraffic = current
+                    return
+                }
+            } catch (_: Exception) {}
+        } catch (_: Exception) {}
+    }
+
+    private suspend fun fetchClients() {
+        try {
+            val data = client.getJSON("/api/network/clients")
+            var devices = DeviceParser.parseHostHints(data)
+            try {
+                val leases = client.getJSONArray("/api/network/clients")
+                devices = DeviceParser.enrichWithDHCP(devices, leases)
+            } catch (_: Exception) {}
+            connectedDevices.value = devices
+        } catch (_: Exception) {}
+    }
+
+    private suspend fun fetchWan() {
+        try {
+            val wan4 = client.getJSON("/api/network/wan")
+            wanIPv4.value = DeviceParser.parseWanIPv4(wan4)
+        } catch (_: Exception) {}
+        try {
+            val wan6 = client.getJSON("/api/network/wan6")
+            wanIPv6.value = DeviceParser.parseWanIPv6(wan6)
+        } catch (_: Exception) {}
+    }
+
+    private suspend fun fetchWifi() {
+        try {
+            val data = client.getJSON("/api/wifi/status")
+            wifiStatus.value = DeviceParser.parseWifiStatus(data)
+        } catch (_: Exception) {}
+    }
+
+    private suspend fun fetchSystem() {
+        try {
+            val cpuData = client.getJSON("/api/cpu")
+            val cores = DeviceParser.asInt(cpuData["cores"])
+            if (cores != null && cores > 0) cpuCores = cores
+            val usage = DeviceParser.asDouble(cpuData["usage_percent"])
+            if (usage != null) {
+                systemInfo.value = systemInfo.value.copy(
+                    cpuUsagePercent = usage,
+                    cpuUsageIsEstimate = false,
+                    cpuCores = cpuCores,
+                )
             }
-        }
+        } catch (_: Exception) {}
 
-        // Fallback: network.device status (rmnet_data0)
-        if (source.isEmpty()) {
-            val params = buildJsonObject { put("name", "rmnet_data0") }
-            val data = try { ubusClient.call("network.device", "status", params) } catch (_: Exception) { null }
-            val stats = data?.get("statistics")?.jsonObject
-            if (stats != null) {
-                rxBytes = stats["rx_bytes"]?.jsonPrimitive?.longOrNull ?: 0
-                txBytes = stats["tx_bytes"]?.jsonPrimitive?.longOrNull ?: 0
-                if (rxBytes > 0) source = "rmnet_ubus"
+        try {
+            val sysData = client.getJSON("/api/device/system")
+            val info = DeviceParser.parseSystemInfo(sysData, cpuCores)
+            val current = systemInfo.value
+            systemInfo.value = if (!current.cpuUsageIsEstimate) {
+                info.copy(
+                    cpuUsagePercent = current.cpuUsagePercent,
+                    cpuUsageIsEstimate = false,
+                    cpuCores = cpuCores,
+                )
+            } else {
+                info.copy(cpuCores = cpuCores)
             }
-        }
-
-        if (source.isEmpty()) return TrafficStats()
-
-        val now = System.currentTimeMillis()
-        var rxSpeed = 0.0
-        var txSpeed = 0.0
-
-        if (precomputedRxRate != null && precomputedTxRate != null) {
-            // Use pre-computed rates (bytes/sec) from router
-            rxSpeed = precomputedRxRate
-            txSpeed = precomputedTxRate
-        } else if (prevTimestamp > 0 && now > prevTimestamp && source == prevSource) {
-            // Delta computation (bytes/sec), skip when source changes to avoid invalid spikes
-            val dtSec = (now - prevTimestamp) / 1000.0
-            if (dtSec > 0) {
-                rxSpeed = (rxBytes - prevRxBytes) / dtSec
-                txSpeed = (txBytes - prevTxBytes) / dtSec
-                if (rxSpeed < 0) rxSpeed = 0.0
-                if (txSpeed < 0) txSpeed = 0.0
-            }
-        }
-        prevRxBytes = rxBytes
-        prevTxBytes = txBytes
-        prevTimestamp = now
-        prevSource = source
-
-        return TrafficStats(
-            rxBytes = rxBytes,
-            txBytes = txBytes,
-            rxBytesPerSec = rxSpeed,
-            txBytesPerSec = txSpeed,
-            timestamp = now,
-        )
+        } catch (_: Exception) {}
     }
 
-    private suspend fun fetchClientCount(): Int {
-        return try {
-            val data = ubusClient.call("luci-rpc", "getHostHints") ?: return 0
-            data.size
-        } catch (_: Exception) {
-            0
-        }
+    private suspend fun fetchModemStatus() {
+        try {
+            val data = client.getJSON("/api/modem/status")
+            val mode = data["operate_mode"] as? String ?: ""
+            isAirplaneMode.value = mode.isNotEmpty() && mode != "ONLINE"
+        } catch (_: Exception) {}
+    }
+
+    private suspend fun fetchMobileDataStatus() {
+        try {
+            val data = client.getJSON("/api/modem/data")
+            val enabled = DeviceParser.asInt(data["enable"])
+            if (enabled != null) {
+                isMobileDataOff.value = enabled == 0
+            }
+        } catch (_: Exception) {}
+    }
+
+    private suspend fun fetchSimStatus() {
+        try {
+            val data = client.getJSON("/api/sim/info")
+            val simStates = data["sim_states"] as? String ?: ""
+            val modemState = data["modem_main_state"] as? String ?: ""
+            simPinRequired.value = simStates.contains("PIN", ignoreCase = true)
+                || modemState.contains("SIM PIN", ignoreCase = true)
+            simPukRequired.value = simStates.contains("PUK", ignoreCase = true)
+                || modemState.contains("SIM PUK", ignoreCase = true)
+        } catch (_: Exception) {}
     }
 
     override fun onCleared() {

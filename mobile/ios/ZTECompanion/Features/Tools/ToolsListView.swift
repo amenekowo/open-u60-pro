@@ -7,7 +7,27 @@ struct ToolsListView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section("Automation") {
+                    NavigationLink {
+                        SchedulerView(viewModel: SchedulerViewModel(client: client, authManager: authManager))
+                    } label: {
+                        Label("Automations", systemImage: "clock.arrow.2.circlepath")
+                    }
+                }
+
                 Section("Network Tools") {
+                    NavigationLink {
+                        SpeedTestView(viewModel: SpeedTestViewModel(client: client, authManager: authManager))
+                    } label: {
+                        Label("Speed Test", systemImage: "speedometer")
+                    }
+
+                    NavigationLink {
+                        LANSpeedTestView(viewModel: LANSpeedTestViewModel(client: client))
+                    } label: {
+                        Label("LAN Speed Test", systemImage: "wifi")
+                    }
+
                     NavigationLink {
                         EnableADBView(client: client, authManager: authManager)
                     } label: {

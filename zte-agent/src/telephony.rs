@@ -251,23 +251,30 @@ fn decode_hex_ascii(hex: &str) -> String {
     out
 }
 
-fn run_qcrilnr(commands: &[&str], wait: u64) -> Result<String, String> {
-    use std::process::Command;
-    let input = commands.join("\n") + "\n";
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let tmpfile = format!("/tmp/qcrilnr_input_{ts}");
-    std::fs::write(&tmpfile, &input).map_err(|e| format!("cannot write temp file: {e}"))?;
-    let script = format!(
-        "timeout {wait} qcrilnr-console-app < {tmpfile} 2>&1; rm -f {tmpfile}"
-    );
-    let output = Command::new("sh")
-        .args(["-c", &script])
-        .output()
-        .map_err(|e| format!("failed to run qcrilnr: {e}"))?;
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+/// Check if the SIM supports STK by reading EF_DIR (AT+CUAD) for STK/USAT AIDs,
+/// and falling back to AT+STIN? as a secondary indicator.
+fn detect_stk_support(at_port: &crate::at_cmd::AtPort) -> (bool, String) {
+    // Check AT+CUAD for SIM application directory
+    if let Ok(resp) = at_cmd::send(at_port, "AT+CUAD", 3) {
+        if !resp.contains("ERROR") {
+            // Look for STK/USAT AID prefix: A000000009
+            let upper = resp.to_uppercase();
+            if upper.contains("A000000009") {
+                return (true, "STK AID found in EF_DIR (AT+CUAD)".into());
+            }
+            // CUAD responded but no STK AID
+            // Fall through to STIN check
+        }
+    }
+
+    // Secondary: check AT+STIN? — if the modem returns any STIN value, STK is active
+    if let Ok(resp) = at_cmd::send(at_port, "AT+STIN?", 2) {
+        if resp.contains("STIN") && !resp.contains("ERROR") {
+            return (true, "STK indicated by AT+STIN? response".into());
+        }
+    }
+
+    (false, "No STK AID in EF_DIR and no STIN response — SIM does not support STK".into())
 }
 
 fn format_ussd_response(parsed: (i64, String, u32)) -> Value {
@@ -448,6 +455,18 @@ pub fn ussd_cancel(state: &AppState) -> (u16, Value) {
 
 /// GET /api/stk/menu
 pub fn stk_menu(state: &AppState) -> (u16, Value) {
+    let (supported, diag) = detect_stk_support(&state.at_port);
+
+    if !supported {
+        return (200, json!({"ok": true, "data": {
+            "supported": false,
+            "items": [],
+            "reason": diag,
+        }}));
+    }
+
+    let mut diagnostics = vec![diag];
+
     // Try AT+CUSATD first
     if let Ok(resp) = at_cmd::send(&state.at_port, "AT+CUSATD=1", 5) {
         if !resp.contains("ERROR") {
@@ -455,14 +474,19 @@ pub fn stk_menu(state: &AppState) -> (u16, Value) {
             if let Some(hex) = hex {
                 if let Some(menu) = parse_stk_menu_tlv(&hex) {
                     return (200, json!({"ok": true, "data": {
+                        "supported": true,
                         "title": menu.title,
                         "items": menu.items,
                         "source": "at_cusatd",
                     }}));
                 }
             }
+            diagnostics.push("AT+CUSATD=1 responded but no parseable menu".into());
+        } else {
+            diagnostics.push("AT+CUSATD=1 returned ERROR".into());
         }
     }
+
     // Try AT+STIN? / AT+STGI fallback
     if let Ok(resp) = at_cmd::send(&state.at_port, "AT+STIN?", 3) {
         if resp.contains("STIN") {
@@ -474,6 +498,7 @@ pub fn stk_menu(state: &AppState) -> (u16, Value) {
                         let (title, items) = parse_stgi_response(&stgi);
                         if !items.is_empty() {
                             return (200, json!({"ok": true, "data": {
+                                "supported": true,
                                 "title": title,
                                 "items": items,
                                 "source": "at_stgi",
@@ -482,30 +507,29 @@ pub fn stk_menu(state: &AppState) -> (u16, Value) {
                     }
                 }
             }
+            diagnostics.push(format!("AT+STIN? returned type {:?}, no menu from STGI", stin_type));
         }
     }
-    // Try qcrilnr as last resort
-    if let Ok(qout) = run_qcrilnr(&["1", "5", "A0C00000011901", "q"], 5) {
-        if qout.contains("SUCCESS") {
-            let hex = extract_hex_from_qcrilnr(&qout);
-            if let Some(hex) = hex {
-                if let Some(menu) = parse_stk_menu_tlv(&hex) {
-                    if !menu.items.is_empty() {
-                        return (200, json!({"ok": true, "data": {
-                            "title": menu.title,
-                            "items": menu.items,
-                            "source": "qcrilnr",
-                        }}));
-                    }
-                }
-            }
-        }
-    }
-    (503, json!({"ok": false, "error": "STK menu not available", "hint": "SIM may not support STK or no proactive command pending"}))
+
+    // STK supported but no menu currently available
+    (200, json!({"ok": true, "data": {
+        "supported": true,
+        "items": [],
+        "reason": "no proactive command pending",
+        "diagnostics": diagnostics,
+    }}))
 }
 
 /// POST /api/stk/select — body: {"item_id": 1}
 pub fn stk_select(state: &AppState, body: &[u8]) -> (u16, Value) {
+    let (supported, diag) = detect_stk_support(&state.at_port);
+    if !supported {
+        return (200, json!({"ok": true, "data": {
+            "supported": false,
+            "reason": diag,
+        }}));
+    }
+
     let parsed: Value = match serde_json::from_slice(body) {
         Ok(v) => v,
         Err(_) => return (400, json!({"ok": false, "error": "invalid JSON"})),
@@ -516,7 +540,6 @@ pub fn stk_select(state: &AppState, body: &[u8]) -> (u16, Value) {
     };
     let envelope = format!("D30782020181900101{item_id:02X}");
 
-    // Try AT+CUSATE first
     if let Ok(resp) = at_cmd::send(&state.at_port, &format!("AT+CUSATE=\"{envelope}\""), 8) {
         if !resp.contains("ERROR") {
             let hex = extract_hex(&resp, "CUSATE:");
@@ -532,31 +555,11 @@ pub fn stk_select(state: &AppState, body: &[u8]) -> (u16, Value) {
                     }
                 }
             }
-            // Display text or other response
             let text: String = resp.chars().filter(|c| !c.is_control()).collect();
             return (200, json!({"ok": true, "data": {
                 "type": "display",
                 "data": text,
             }}));
-        }
-    }
-    // Fallback: qcrilnr
-    if let Ok(qout) = run_qcrilnr(&["1", "5", &envelope, "q"], 5) {
-        if qout.contains("SUCCESS") {
-            let hex = extract_hex_from_qcrilnr(&qout);
-            if let Some(hex) = hex {
-                if let Some(menu) = parse_stk_menu_tlv(&hex) {
-                    if !menu.items.is_empty() {
-                        return (200, json!({"ok": true, "data": {
-                            "type": "menu",
-                            "title": menu.title,
-                            "items": menu.items,
-                            "source": "qcrilnr",
-                        }}));
-                    }
-                }
-            }
-            return (200, json!({"ok": true, "data": {"type": "display", "data": "Command sent"}}));
         }
     }
     (500, json!({"ok": false, "error": "item selection failed"}))
@@ -579,26 +582,6 @@ fn extract_hex(resp: &str, prefix: &str) -> Option<String> {
     for line in resp.lines() {
         let trimmed = line.trim();
         if trimmed.len() >= 8 && trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
-            return Some(trimmed.to_string());
-        }
-    }
-    None
-}
-
-fn extract_hex_from_qcrilnr(out: &str) -> Option<String> {
-    // Look for "data = <hex>" or a long hex string
-    for line in out.lines() {
-        if let Some(rest) = line.strip_prefix("data") {
-            let rest = rest.trim().strip_prefix('=').unwrap_or(rest).trim();
-            let hex: String = rest.chars().filter(|c| c.is_ascii_hexdigit()).collect();
-            if hex.len() >= 6 {
-                return Some(hex);
-            }
-        }
-    }
-    for line in out.lines() {
-        let trimmed = line.trim();
-        if trimmed.len() >= 6 && trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
             return Some(trimmed.to_string());
         }
     }

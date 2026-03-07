@@ -91,7 +91,12 @@ struct STKMenuView: View {
 
     private var stkSection: some View {
         Group {
-            if viewModel.hasSTKMenu {
+            if viewModel.stkNotSupported {
+                Section("SIM Toolkit") {
+                    Label("Not available on this SIM", systemImage: "simcard")
+                        .foregroundStyle(.secondary)
+                }
+            } else if viewModel.hasSTKMenu {
                 Section {
                     ForEach(viewModel.stkMenu.items) { item in
                         Button {

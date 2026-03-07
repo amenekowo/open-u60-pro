@@ -15,16 +15,55 @@ struct DeviceControlView: View {
             }
 
             Section {
-                Toggle("Power Supply", isOn: Binding(
-                    get: { viewModel.powerSupplyEnabled },
+                Toggle("Charge Limit", isOn: Binding(
+                    get: { viewModel.chargeLimitEnabled },
                     set: { val in
-                        viewModel.powerSupplyEnabled = val
-                        Task { await viewModel.setPowerSupply(enabled: val) }
+                        viewModel.chargeLimitEnabled = val
+                        Task { await viewModel.setChargeLimit(enabled: val, limit: viewModel.chargeLimit) }
                     }
                 ))
                     .disabled(viewModel.isLoading)
+
+                if viewModel.chargeLimitEnabled {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Stop at \(viewModel.chargeLimit)%")
+                            .font(.subheadline.monospacedDigit())
+                        Slider(
+                            value: Binding(
+                                get: { Double(viewModel.chargeLimit) },
+                                set: { viewModel.chargeLimit = Int($0) }
+                            ),
+                            in: 50...100,
+                            step: 5
+                        ) {
+                            Text("Charge Limit")
+                        } onEditingChanged: { editing in
+                            if !editing {
+                                Task { await viewModel.setChargeLimit(enabled: true, limit: viewModel.chargeLimit) }
+                            }
+                        }
+                        .disabled(viewModel.isLoading)
+                    }
+
+                    Stepper(
+                        "Resume gap: \(viewModel.hysteresis)%",
+                        value: Binding(
+                            get: { viewModel.hysteresis },
+                            set: { newVal in
+                                viewModel.hysteresis = newVal
+                                Task { await viewModel.setChargeLimit(enabled: true, limit: viewModel.chargeLimit, hysteresis: newVal) }
+                            }
+                        ),
+                        in: 1...20
+                    )
+                    .disabled(viewModel.isLoading)
+                }
             } footer: {
-                Text("When enabled, the device runs directly from the AC adapter and maintains battery at 40–60% to extend battery lifespan.")
+                if viewModel.chargeLimitEnabled {
+                    Text("Charging stops at \(viewModel.chargeLimit)% and resumes at \(viewModel.chargeLimit - viewModel.hysteresis)%.\n\nThe resume gap prevents the charger from rapidly switching on and off. A smaller gap (e.g. 2%) keeps the battery closer to your target but toggles the charger more often. A larger gap (e.g. 10%) means fewer charge cycles but the battery level will swing more.\n\nDefault: 5% — good balance for most users.")
+                } else {
+                    Text("Stops charging when battery reaches the set level. Extends battery lifespan.")
+                }
             }
 
             Section {

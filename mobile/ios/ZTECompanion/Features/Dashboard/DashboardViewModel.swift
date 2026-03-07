@@ -74,6 +74,7 @@ final class DashboardViewModel {
         // Parallelize remaining independent network calls
         async let batteryResult = fetchBattery()
         async let chargerResult = fetchCharger()
+        async let chargeControlResult = fetchChargeControl()
         async let thermalResult = fetchThermal()
         async let trafficResult = fetchTraffic()
         async let deviceList = fetchDevices()
@@ -87,8 +88,8 @@ final class DashboardViewModel {
         async let modemResult = fetchModemStatus()
         async let mobileDataResult = fetchMobileDataStatus()
 
-        let (bat, charger, therm, traffic, devices, wan, wan6, wifi, cpu, cpuUse, battCurrent, sim, modemStatus, mobileDataOff) = await (
-            batteryResult, chargerResult, thermalResult, trafficResult,
+        let (bat, charger, chargeCtrl, therm, traffic, devices, wan, wan6, wifi, cpu, cpuUse, battCurrent, sim, modemStatus, mobileDataOff) = await (
+            batteryResult, chargerResult, chargeControlResult, thermalResult, trafficResult,
             deviceList, wanResult, wan6Result, wifiResult, cpuResult, cpuUsage,
             battCurrentResult, simResult, modemResult, mobileDataResult
         )
@@ -113,7 +114,7 @@ final class DashboardViewModel {
         }
         if var b = bat {
             if let chargerData = charger {
-                DeviceParser.parseCharger(chargerData, into: &b)
+                DeviceParser.parseCharger(chargerData, into: &b, chargeControl: chargeCtrl)
             }
             b.currentMA = battCurrent.current
             b.voltageMV = battCurrent.voltage
@@ -185,6 +186,11 @@ final class DashboardViewModel {
 
     private func fetchCharger() async -> [String: Any]? {
         guard let data = try? await client.getJSON("/api/device/charger") else { return nil }
+        return data
+    }
+
+    private func fetchChargeControl() async -> [String: Any]? {
+        guard let data = try? await client.getJSON("/api/device/charge-control") else { return nil }
         return data
     }
 

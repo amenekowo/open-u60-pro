@@ -1,9 +1,9 @@
 package com.ztecompanion.feature.settings
 
 import androidx.lifecycle.ViewModel
+import com.ztecompanion.core.network.AgentClient
 import com.ztecompanion.core.network.AuthManager
 import com.ztecompanion.core.network.AuthState
-import com.ztecompanion.core.network.UbusClient
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -13,7 +13,7 @@ import javax.inject.Inject
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val authManager: AuthManager,
-    private val ubusClient: UbusClient,
+    private val agentClient: AgentClient,
 ) : ViewModel() {
 
     val authState = authManager.authState
@@ -30,7 +30,7 @@ class SettingsViewModel @Inject constructor(
     fun updateGateway(value: String) {
         _gateway.value = value
         authManager.savedGateway = value
-        ubusClient.updateGateway(value)
+        agentClient.baseURL = authManager.resolveBaseURL()
     }
 
     fun updatePollInterval(value: Int) {

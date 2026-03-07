@@ -63,19 +63,22 @@ fun DeviceInfoScreen(
                 }
 
                 InfoSection("Device") {
-                    InfoRow("IMEI", state.info.imei)
+                    InfoRow("IMEI", state.identity.imei)
                 }
 
                 InfoSection("SIM") {
-                    InfoRow("ICCID", state.info.sim.iccid)
-                    InfoRow("IMSI", state.info.sim.imsi)
-                    InfoRow("MSISDN", state.info.sim.msisdn)
+                    InfoRow("Status", state.identity.simStatus)
+                    InfoRow("ICCID", state.identity.simICCID)
+                    InfoRow("IMSI", state.identity.simIMSI)
+                    InfoRow("MSISDN", state.identity.msisdn)
+                    InfoRow("Operator", state.identity.spn)
+                    InfoRow("MCC/MNC", "${state.identity.mcc}/${state.identity.mnc}")
                 }
 
                 InfoSection("Network") {
-                    InfoRow("WAN IPv4", state.info.wanIpv4)
-                    InfoRow("WAN IPv6", state.info.wanIpv6)
-                    InfoRow("LAN IP", state.info.lanIp)
+                    InfoRow("WAN IPv4", state.identity.wanIPv4)
+                    InfoRow("WAN IPv6", state.identity.wanIPv6.firstOrNull() ?: "")
+                    InfoRow("LAN IP", state.identity.lanIP)
                 }
             }
         }

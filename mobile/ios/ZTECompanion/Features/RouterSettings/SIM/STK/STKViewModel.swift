@@ -12,6 +12,7 @@ final class STKViewModel {
     // STK state
     var stkMenu: STKMenu = .empty
     var menuStack: [STKMenu] = []
+    var stkNotSupported: Bool = false
 
     // Common
     var isLoading: Bool = false
@@ -101,13 +102,15 @@ final class STKViewModel {
     func loadSTKMenu() async {
         isLoading = true
         message = nil
+        stkNotSupported = false
 
         do {
             let data = try await client.getJSON("/api/stk/menu")
 
             if let error = STKParser.parseError(data) {
-                let hint = data["hint"] as? String
-                showMessage(hint ?? error, isError: true)
+                showMessage(error, isError: true)
+            } else if data["supported"] as? Bool == false {
+                stkNotSupported = true
             } else {
                 stkMenu = STKParser.parseSTKMenu(data)
                 menuStack = []
@@ -127,6 +130,8 @@ final class STKViewModel {
 
             if let error = STKParser.parseError(data) {
                 showMessage(error, isError: true)
+            } else if data["supported"] as? Bool == false {
+                stkNotSupported = true
             } else {
                 let responseType = data["type"] as? String ?? ""
                 if responseType == "menu" {

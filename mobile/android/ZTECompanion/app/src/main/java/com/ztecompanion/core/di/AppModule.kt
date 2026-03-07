@@ -1,8 +1,8 @@
 package com.ztecompanion.core.di
 
 import android.content.Context
+import com.ztecompanion.core.network.AgentClient
 import com.ztecompanion.core.network.AuthManager
-import com.ztecompanion.core.network.UbusClient
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -16,12 +16,12 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideUbusClient(): UbusClient = UbusClient()
+    fun provideAgentClient(): AgentClient = AgentClient()
 
     @Provides
     @Singleton
     fun provideAuthManager(
         @ApplicationContext context: Context,
-        ubusClient: UbusClient,
-    ): AuthManager = AuthManager(context, ubusClient)
+        agentClient: AgentClient,
+    ): AuthManager = AuthManager(context, agentClient)
 }

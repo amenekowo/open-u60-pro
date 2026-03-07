@@ -1,15 +1,19 @@
 mod at_cmd;
 mod auth;
 mod cell;
+mod charge_policy;
 mod device_ext;
 pub mod doh;
 mod handlers;
+mod lan_test;
 mod modem_ext;
 mod network_ext;
 mod router;
+mod scheduler;
 mod server;
 mod sim;
 mod sms;
+mod speedtest;
 mod system;
 mod telephony;
 mod ubus;
@@ -41,6 +45,8 @@ fn main() {
     }
 
     state.doh.auto_start();
+    state.scheduler.start(Arc::clone(&state));
+    state.charge_limit.start();
 
     server::start(&bind, threads, state);
 }

@@ -38,6 +38,10 @@ struct CPUCardView: View {
 struct CPUDetailSheet: View {
     let systemInfo: SystemInfo
     let thermal: ThermalStatus
+    let client: AgentClient
+
+    @State private var showProcessList = false
+    @State private var bloatSummary: String = ""
 
     var body: some View {
         NavigationStack {
@@ -55,9 +59,44 @@ struct CPUDetailSheet: View {
                     let used = Double(systemInfo.memTotal - systemInfo.memFree) / Double(systemInfo.memTotal) * 100
                     row("Memory Used", icon: "chart.bar", value: String(format: "%.0f%%", used))
                 }
+
+                Button {
+                    showProcessList = true
+                } label: {
+                    HStack {
+                        Label("Processes", systemImage: "list.number")
+                        Spacer()
+                        if !bloatSummary.isEmpty {
+                            Text(bloatSummary)
+                                .foregroundStyle(.orange)
+                                .font(.caption)
+                        }
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .foregroundStyle(.primary)
             }
             .navigationTitle("CPU & Memory")
             .navigationBarTitleDisplayMode(.inline)
+            .sheet(isPresented: $showProcessList) {
+                ProcessListSheet(client: client)
+            }
+            .task {
+                await loadBloatSummary()
+            }
+        }
+    }
+
+    private func loadBloatSummary() async {
+        do {
+            let result: ProcessListResponse = try await client.get("/api/system/top")
+            if result.bloatCount > 0 {
+                bloatSummary = "\(result.bloatCount) bloat \(String(format: "%.0f", result.bloatCpuPct))%"
+            }
+        } catch {
+            // Silently ignore — summary is optional
         }
     }
 

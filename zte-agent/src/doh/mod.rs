@@ -50,7 +50,6 @@ impl DohProxy {
             .map_err(|e| format!("set timeout: {e}"))?;
 
         self.running.store(true, Ordering::Relaxed);
-        eprintln!("DoH proxy listening on udp://{addr}");
 
         let proxy = Arc::clone(self);
         let handle = thread::spawn(move || listener_loop(socket, proxy));
@@ -64,7 +63,6 @@ impl DohProxy {
         if let Some(h) = handle {
             let _ = h.join();
         }
-        eprintln!("DoH proxy stopped");
     }
 
     pub fn status(&self) -> Value {
@@ -126,8 +124,7 @@ impl DohProxy {
     pub fn auto_start(self: &Arc<Self>) {
         let cfg = self.config.lock().unwrap().clone();
         if cfg.enabled {
-            if let Err(e) = self.start() {
-                eprintln!("DoH auto-start failed: {e}");
+            if self.start().is_err() {
                 return;
             }
             // Re-create dnsmasq drop-in (lost on reboot since /tmp is tmpfs)
@@ -173,8 +170,7 @@ fn listener_loop(socket: UdpSocket, proxy: Arc<DohProxy>) {
         let (len, src) = match socket.recv_from(&mut buf) {
             Ok(r) => r,
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => continue,
-            Err(e) => {
-                eprintln!("DoH recv error: {e}");
+            Err(_) => {
                 continue;
             }
         };
@@ -214,8 +210,7 @@ fn listener_loop(socket: UdpSocket, proxy: Arc<DohProxy>) {
                 }
                 let _ = socket.send_to(&response, src);
             }
-            Err(e) => {
-                eprintln!("DoH upstream error: {e}");
+            Err(_) => {
                 // Return SERVFAIL
                 let mut fail = query.to_vec();
                 if fail.len() >= 4 {

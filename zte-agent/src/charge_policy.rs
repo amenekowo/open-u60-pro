@@ -1,7 +1,9 @@
 use std::fs;
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::ubus;
 
@@ -53,19 +55,16 @@ fn is_charging_stopped() -> bool {
 fn set_charging(allow: bool) {
     let mode = if allow { "disable" } else { "enable" };
     let params = format!(r#"{{"direct_power_supply_mode":"{mode}"}}"#);
-    match ubus::call("zwrt_bsp.charger", "set", Some(&params)) {
-        Ok(_) => {
-            // Verify the change took effect
-            let stopped = is_charging_stopped();
-            let expected_stopped = !allow;
-            if stopped != expected_stopped {
-                eprintln!(
-                    "charge_limit: WARNING set_charging({}) succeeded but state mismatch: stopped={}",
-                    allow, stopped
-                );
-            }
-        }
-        Err(e) => eprintln!("charge_limit: ERROR set_charging({}) failed: {}", allow, e),
+    let _ = ubus::call("zwrt_bsp.charger", "set", Some(&params));
+}
+
+/// Extract `charger_connect` from event payload.
+/// Returns `Some(true)` for connected, `Some(false)` for disconnected, `None` if not present.
+fn charger_connect_value(event: &Value) -> Option<bool> {
+    match &event["charger_connect"] {
+        Value::Number(n) => Some(n.as_u64() != Some(0)),
+        Value::String(s) => Some(s != "0"),
+        _ => None,
     }
 }
 
@@ -90,32 +89,109 @@ impl ChargeLimitEnforcer {
         }
     }
 
-    pub fn start(self: &Arc<Self>) {
+    /// Start with event-driven charger events + fallback polling.
+    pub fn start(self: &Arc<Self>, charger_events: mpsc::Receiver<Value>) {
         let enforcer = Arc::clone(self);
         std::thread::spawn(move || {
-            eprintln!(
-                "Charge limit enforcer started ({}s/{}s active/idle)",
-                POLL_ACTIVE_SECS, POLL_IDLE_SECS
-            );
-            loop {
-                let interval = enforcer.tick();
-                std::thread::sleep(std::time::Duration::from_secs(interval));
-            }
+            enforcer.event_loop(charger_events);
         });
     }
 
-    fn tick(&self) -> u64 {
-        let state = self.inner.lock().unwrap();
-        if !state.enabled || state.manual_override {
-            return POLL_IDLE_SECS;
+    fn event_loop(&self, rx: mpsc::Receiver<Value>) {
+        // Assume charger connected on startup so we enforce on first tick.
+        // The first real BSP_CHARGER_EVENT will correct the state.
+        let mut charger_connected = true;
+
+        loop {
+            // When charger is disconnected, block until next event (no polling needed)
+            if !charger_connected {
+                match rx.recv() {
+                    Ok(event) => {
+                        if charger_connect_value(&event) == Some(true) {
+                            charger_connected = true;
+                            eprintln!("[charge_policy] charger connected — resuming enforcement");
+                            std::thread::sleep(std::time::Duration::from_millis(500));
+                            let state = self.inner.lock().unwrap();
+                            if state.enabled && !state.manual_override {
+                                let (limit, hyst) = (state.limit, state.hysteresis);
+                                drop(state);
+                                self.enforce(limit, hyst);
+                            }
+                        }
+                        continue;
+                    }
+                    Err(_) => {
+                        eprintln!("[charge_policy] event channel disconnected, falling back to polling");
+                        self.poll_loop();
+                        return;
+                    }
+                }
+            }
+
+            // Charger connected — poll with timeout for periodic enforcement
+            let (enabled, manual_override, limit, hysteresis) = {
+                let state = self.inner.lock().unwrap();
+                (state.enabled, state.manual_override, state.limit, state.hysteresis)
+            };
+
+            let timeout = if enabled && !manual_override {
+                POLL_ACTIVE_SECS
+            } else {
+                POLL_IDLE_SECS
+            };
+
+            match rx.recv_timeout(std::time::Duration::from_secs(timeout)) {
+                Ok(event) => {
+                    if charger_connect_value(&event) == Some(false) {
+                        charger_connected = false;
+                        eprintln!("[charge_policy] charger disconnected — suspending enforcement");
+                        // Re-enable charging so next plug-in starts normally
+                        if is_charging_stopped() {
+                            set_charging(true);
+                            eprintln!("[charge_policy] re-enabled charging (was stopped by limit)");
+                        }
+                        continue;
+                    }
+                    // Other charger event while connected — enforce immediately
+                    let state = self.inner.lock().unwrap();
+                    if state.enabled && !state.manual_override {
+                        let (limit, hyst) = (state.limit, state.hysteresis);
+                        drop(state);
+                        std::thread::sleep(std::time::Duration::from_millis(500));
+                        self.enforce(limit, hyst);
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if enabled && !manual_override {
+                        self.enforce(limit, hysteresis);
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    eprintln!("[charge_policy] event channel disconnected, falling back to polling");
+                    self.poll_loop();
+                    return;
+                }
+            }
         }
+    }
 
-        let limit = state.limit;
-        let hysteresis = state.hysteresis;
-        drop(state);
+    /// Pure polling fallback if event bus dies.
+    fn poll_loop(&self) {
+        loop {
+            let state = self.inner.lock().unwrap();
+            let (enabled, manual_override, limit, hysteresis) = (
+                state.enabled, state.manual_override, state.limit, state.hysteresis,
+            );
+            drop(state);
 
-        self.enforce(limit, hysteresis);
-        POLL_ACTIVE_SECS
+            let interval = if enabled && !manual_override {
+                self.enforce(limit, hysteresis);
+                POLL_ACTIVE_SECS
+            } else {
+                POLL_IDLE_SECS
+            };
+            std::thread::sleep(std::time::Duration::from_secs(interval));
+        }
     }
 
     /// Core enforcement logic: read capacity and stop/resume charging as needed.
@@ -124,7 +200,6 @@ impl ChargeLimitEnforcer {
 
         let status = fs::read_to_string(SYSFS_STATUS).unwrap_or_default();
         if status.trim() == "Discharging" && !stopped {
-            eprintln!("charge_limit: on battery (not plugged in), skipping");
             return;
         }
 
@@ -133,24 +208,10 @@ impl ChargeLimitEnforcer {
             .and_then(|s| s.trim().parse().ok())
             .unwrap_or(0);
 
-        eprintln!(
-            "charge_limit: tick capacity={}% limit={}% stopped={}",
-            capacity, limit, stopped
-        );
-
         if capacity >= limit && !stopped {
             set_charging(false);
-            eprintln!(
-                "charge_limit: capacity {}% >= limit {}%, stopping charge",
-                capacity, limit
-            );
         } else if capacity <= limit.saturating_sub(hysteresis) && stopped {
             set_charging(true);
-            eprintln!(
-                "charge_limit: capacity {}% <= {}%, resuming charge",
-                capacity,
-                limit.saturating_sub(hysteresis)
-            );
         }
     }
 
@@ -175,13 +236,8 @@ impl ChargeLimitEnforcer {
         drop(state);
 
         if enabled {
-            eprintln!(
-                "charge_limit: set enabled={} limit={}% hysteresis={}%, enforcing immediately",
-                enabled, limit, hysteresis
-            );
             self.enforce(limit, hysteresis);
         } else {
-            eprintln!("charge_limit: disabled, resuming charge");
             set_charging(true);
         }
 

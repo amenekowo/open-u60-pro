@@ -174,7 +174,6 @@ impl Scheduler {
     pub fn start(&self, state: Arc<AppState>) {
         let state = Arc::clone(&state);
         std::thread::spawn(move || {
-            eprintln!("Scheduler started (30s tick)");
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(TICK_SECS));
                 state.scheduler.tick(&state);
@@ -267,10 +266,6 @@ impl Scheduler {
             .into_iter()
             .filter_map(|pa| {
                 let method = parse_method(&pa.method)?;
-                eprintln!(
-                    "scheduler: exec job {} {} {} (restore={})",
-                    pa.job_id, pa.method, pa.path, pa.is_restore
-                );
                 let (status, resp) = crate::server::route(&method, &pa.path, state, &pa.body);
                 let error = if status >= 400 {
                     resp.get("error")

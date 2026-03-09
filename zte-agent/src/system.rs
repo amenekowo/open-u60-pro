@@ -382,3 +382,285 @@ fn read_rmnet_bytes() -> (u64, u64) {
 fn read_sysfs_u64(path: &str) -> Option<u64> {
     fs::read_to_string(path).ok()?.trim().parse().ok()
 }
+
+// -- Process monitor --
+
+/// Known bloat daemons (from daemon-cleanup.md).
+const BLOAT_DAEMONS: &[&str] = &[
+    "zte_topsw_tr069",
+    "zte_topsw_tr069_sub",
+    "zte_topsw_tr098db",
+    "zte_topsw_fota_result",
+    "zte_mqtt_sdk_st",
+    "zte_topsw_diag",
+    "zte_topsw_samba",
+    "zte_topsw_nfc",
+    "zte_smart_manage",
+    "zte_topsw_get_brand",
+    "zte_topsw_mc",
+    "zte_dm",
+    "zte_topsw_wms",
+    "zte_topsw_sleep_faw",
+    "zte_topsw_jwxk_query",
+    "zte-topsw-tunnel",
+    "zte_dua",
+];
+
+#[derive(Serialize)]
+pub struct ProcessEntry {
+    pub pid: u32,
+    pub name: String,
+    pub cpu_pct: f64,
+    pub rss_kb: u64,
+    pub state: String,
+    pub is_bloat: bool,
+}
+
+#[derive(Serialize)]
+pub struct ProcessListResult {
+    pub processes: Vec<ProcessEntry>,
+    pub total_count: usize,
+    pub bloat_count: usize,
+    pub bloat_cpu_pct: f64,
+    pub bloat_rss_kb: u64,
+}
+
+#[derive(Serialize)]
+pub struct KilledProcess {
+    pub pid: u32,
+    pub name: String,
+}
+
+#[derive(Serialize)]
+pub struct KillBloatResult {
+    pub killed: Vec<KilledProcess>,
+    pub skipped: Vec<KilledProcess>,
+    pub freed_rss_kb: u64,
+}
+
+pub struct ProcessTracker {
+    prev: Mutex<(HashMap<u32, u64>, u64)>, // (per-pid ticks, total CPU ticks)
+}
+
+impl ProcessTracker {
+    pub fn new() -> Self {
+        Self {
+            prev: Mutex::new((HashMap::new(), 0)),
+        }
+    }
+
+    pub fn sample(&self) -> ProcessListResult {
+        let total_ticks = read_total_cpu_ticks();
+        let mut prev = self.prev.lock().unwrap();
+        let (prev_per_pid, prev_total) = &*prev;
+        let dt = total_ticks.saturating_sub(*prev_total);
+
+        let mut entries: Vec<ProcessEntry> = Vec::new();
+        let mut new_per_pid: HashMap<u32, u64> = HashMap::new();
+
+        let proc_dir = match fs::read_dir("/proc") {
+            Ok(d) => d,
+            Err(_) => {
+                return ProcessListResult {
+                    processes: Vec::new(),
+                    total_count: 0,
+                    bloat_count: 0,
+                    bloat_cpu_pct: 0.0,
+                    bloat_rss_kb: 0,
+                };
+            }
+        };
+
+        for entry in proc_dir.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            let pid: u32 = match name_str.parse() {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+
+            let stat_path = format!("/proc/{pid}/stat");
+            let stat_str = match fs::read_to_string(&stat_path) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            // Parse /proc/PID/stat — comm is in parens, fields after closing paren
+            let comm_start = match stat_str.find('(') {
+                Some(i) => i + 1,
+                None => continue,
+            };
+            let comm_end = match stat_str.rfind(')') {
+                Some(i) => i,
+                None => continue,
+            };
+            let comm = stat_str[comm_start..comm_end].to_string();
+            let after_comm = &stat_str[comm_end + 2..]; // skip ") "
+            let fields: Vec<&str> = after_comm.split_whitespace().collect();
+            // fields[0]=state, fields[11]=utime, fields[12]=stime, fields[21]=rss(pages)
+            if fields.len() < 22 {
+                continue;
+            }
+            let state_char = fields[0].to_string();
+            let utime: u64 = fields[11].parse().unwrap_or(0);
+            let stime: u64 = fields[12].parse().unwrap_or(0);
+            let proc_ticks = utime + stime;
+            let rss_pages: u64 = fields[21].parse().unwrap_or(0);
+            let rss_kb = rss_pages * 4; // page size = 4K
+
+            // CPU% delta
+            let cpu_pct = if dt > 0 {
+                let prev_ticks = prev_per_pid.get(&pid).copied().unwrap_or(proc_ticks);
+                let dp = proc_ticks.saturating_sub(prev_ticks);
+                let pct = (dp as f64 / dt as f64) * 100.0;
+                (pct * 10.0).round() / 10.0
+            } else {
+                0.0
+            };
+
+            new_per_pid.insert(pid, proc_ticks);
+
+            // Read cmdline for better name matching
+            let cmdline_name = fs::read_to_string(format!("/proc/{pid}/cmdline"))
+                .ok()
+                .and_then(|s| {
+                    let clean = s.replace('\0', " ");
+                    let first = clean.split_whitespace().next()?.to_string();
+                    let basename = first.rsplit('/').next().unwrap_or(&first).to_string();
+                    if basename.is_empty() { None } else { Some(basename) }
+                });
+
+            let display_name = cmdline_name.as_deref().unwrap_or(&comm);
+            let is_bloat = BLOAT_DAEMONS.iter().any(|&b| display_name == b);
+
+            let state_desc = match state_char.as_str() {
+                "R" => "running",
+                "S" => "sleeping",
+                "D" => "disk",
+                "Z" => "zombie",
+                "T" => "stopped",
+                _ => "other",
+            };
+
+            entries.push(ProcessEntry {
+                pid,
+                name: display_name.to_string(),
+                cpu_pct,
+                rss_kb,
+                state: state_desc.to_string(),
+                is_bloat,
+            });
+        }
+
+        // Update stored state
+        *prev = (new_per_pid, total_ticks);
+
+        // Sort by CPU% desc
+        entries.sort_by(|a, b| b.cpu_pct.partial_cmp(&a.cpu_pct).unwrap_or(std::cmp::Ordering::Equal));
+
+        let total_count = entries.len();
+        let bloat_count = entries.iter().filter(|e| e.is_bloat).count();
+        let bloat_cpu_pct = entries.iter().filter(|e| e.is_bloat).map(|e| e.cpu_pct).sum::<f64>();
+        let bloat_cpu_pct = (bloat_cpu_pct * 10.0).round() / 10.0;
+        let bloat_rss_kb: u64 = entries.iter().filter(|e| e.is_bloat).map(|e| e.rss_kb).sum();
+
+        // Keep top 50
+        entries.truncate(50);
+
+        ProcessListResult {
+            processes: entries,
+            total_count,
+            bloat_count,
+            bloat_cpu_pct,
+            bloat_rss_kb,
+        }
+    }
+}
+
+fn read_total_cpu_ticks() -> u64 {
+    let content = match fs::read_to_string("/proc/stat") {
+        Ok(c) => c,
+        Err(_) => return 0,
+    };
+    for line in content.lines() {
+        if line.starts_with("cpu ") {
+            return line
+                .split_whitespace()
+                .skip(1)
+                .filter_map(|s| s.parse::<u64>().ok())
+                .sum();
+        }
+    }
+    0
+}
+
+/// Kill bloat daemons. If `pids` is None, kill all running bloat.
+pub fn kill_bloat(pids: Option<&[u32]>) -> KillBloatResult {
+    let mut killed = Vec::new();
+    let mut skipped = Vec::new();
+    let mut freed_rss_kb: u64 = 0;
+
+    let targets: Vec<(u32, String, u64)> = match pids {
+        Some(pid_list) => {
+            pid_list.iter().filter_map(|&pid| {
+                let (name, rss) = read_proc_name_rss(pid)?;
+                Some((pid, name, rss))
+            }).collect()
+        }
+        None => {
+            // Find all bloat processes
+            let proc_dir = match fs::read_dir("/proc") {
+                Ok(d) => d,
+                Err(_) => return KillBloatResult { killed, skipped, freed_rss_kb },
+            };
+            proc_dir.flatten().filter_map(|entry| {
+                let pid: u32 = entry.file_name().to_string_lossy().parse().ok()?;
+                let (name, rss) = read_proc_name_rss(pid)?;
+                if BLOAT_DAEMONS.iter().any(|&b| b == name) {
+                    Some((pid, name, rss))
+                } else {
+                    None
+                }
+            }).collect()
+        }
+    };
+
+    for (pid, name, rss_kb) in targets {
+        if !BLOAT_DAEMONS.iter().any(|&b| b == name) {
+            skipped.push(KilledProcess { pid, name });
+            continue;
+        }
+        let ret = unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+        if ret == 0 {
+            freed_rss_kb += rss_kb;
+            killed.push(KilledProcess { pid, name });
+        } else {
+            skipped.push(KilledProcess { pid, name });
+        }
+    }
+
+    KillBloatResult { killed, skipped, freed_rss_kb }
+}
+
+fn read_proc_name_rss(pid: u32) -> Option<(String, u64)> {
+    let stat_str = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let comm_end = stat_str.rfind(')')?;
+    let after_comm = stat_str.get(comm_end + 2..)?;
+    let fields: Vec<&str> = after_comm.split_whitespace().collect();
+    let rss_pages: u64 = fields.get(21)?.parse().ok()?;
+
+    let name = fs::read_to_string(format!("/proc/{pid}/cmdline"))
+        .ok()
+        .and_then(|s| {
+            let clean = s.replace('\0', " ");
+            let first = clean.split_whitespace().next()?.to_string();
+            let basename = first.rsplit('/').next().unwrap_or(&first).to_string();
+            if basename.is_empty() { None } else { Some(basename) }
+        })
+        .unwrap_or_else(|| {
+            let comm_start = stat_str.find('(').unwrap_or(0) + 1;
+            stat_str[comm_start..comm_end].to_string()
+        });
+
+    Some((name, rss_pages * 4))
+}

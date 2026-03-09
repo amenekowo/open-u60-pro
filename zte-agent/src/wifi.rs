@@ -206,7 +206,7 @@ pub fn wifi_set(_state: &AppState, body: &[u8]) -> (u16, Value) {
         if let Some(&(_, path)) = uci_map.iter().find(|&&(k, _)| k == key) {
             let current = ubus::uci_get(path).unwrap_or_default();
             if current != val_str {
-                if let Err(e) = ubus::uci_set(path, &val_str) {
+                if let Err(e) = ubus::uci_set_no_commit(path, &val_str) {
                     return (500, json!({"ok": false, "error": e}));
                 }
                 wireless_changed = true;
@@ -226,11 +226,23 @@ pub fn wifi_set(_state: &AppState, body: &[u8]) -> (u16, Value) {
             let current = ubus::uci_get(path).unwrap_or_default();
             if current != val_str {
                 // mbb keys are firmware-dependent; skip silently if missing
-                if ubus::uci_set(path, &val_str).is_ok() {
+                if ubus::uci_set_no_commit(path, &val_str).is_ok() {
                     mbb_changed = true;
                     only_txpower = false;
                 }
             }
+        }
+    }
+
+    // Commit batched changes
+    if wireless_changed {
+        if let Err(e) = ubus::uci_commit("wireless") {
+            return (500, json!({"ok": false, "error": e}));
+        }
+    }
+    if mbb_changed {
+        if let Err(e) = ubus::uci_commit("zte_mbb") {
+            return (500, json!({"ok": false, "error": e}));
         }
     }
 
@@ -328,7 +340,7 @@ pub fn guest_set(_state: &AppState, body: &[u8]) -> (u16, Value) {
         if let Some(&(_, paths)) = guest_map.iter().find(|&&(k, _)| k == key) {
             for &path in paths {
                 // Guest interfaces may not exist; skip silently if missing
-                if ubus::uci_set(path, &val_str).is_ok() {
+                if ubus::uci_set_no_commit(path, &val_str).is_ok() {
                     changed = true;
                 }
             }
@@ -337,6 +349,11 @@ pub fn guest_set(_state: &AppState, body: &[u8]) -> (u16, Value) {
 
     if !changed {
         return (200, json!({"ok": true, "data": {"status": "ok", "note": "no changes"}}));
+    }
+
+    // Commit batched changes
+    if let Err(e) = ubus::uci_commit("wireless") {
+        return (500, json!({"ok": false, "error": e}));
     }
 
     let _ = Command::new("sh")

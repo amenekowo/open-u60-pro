@@ -6,18 +6,21 @@ use crate::at_cmd::AtPort;
 use crate::auth::AuthState;
 use crate::charge_policy::ChargeLimitEnforcer;
 use crate::scheduler::Scheduler;
-use crate::system::{self, CpuTracker, SpeedTracker};
+use crate::sms_forward::SmsForwarder;
+use crate::system::{self, CpuTracker, ProcessTracker, SpeedTracker};
 use crate::ubus;
 
 pub struct AppState {
     pub auth: AuthState,
     pub cpu: CpuTracker,
     pub speed: SpeedTracker,
+    pub proc_tracker: ProcessTracker,
     pub at_port: AtPort,
     pub doh: std::sync::Arc<crate::doh::DohProxy>,
     pub scheduler: Arc<Scheduler>,
     pub speedtest: crate::speedtest::SpeedTest,
     pub charge_limit: Arc<ChargeLimitEnforcer>,
+    pub sms_forward: Arc<SmsForwarder>,
 }
 
 impl AppState {
@@ -26,11 +29,13 @@ impl AppState {
             auth: AuthState::new(),
             cpu: CpuTracker::new(),
             speed: SpeedTracker::new(),
+            proc_tracker: ProcessTracker::new(),
             at_port: AtPort::new(),
             doh: std::sync::Arc::new(crate::doh::DohProxy::new()),
             scheduler: Arc::new(Scheduler::new()),
             speedtest: crate::speedtest::SpeedTest::new(),
             charge_limit: Arc::new(ChargeLimitEnforcer::new()),
+            sms_forward: Arc::new(SmsForwarder::new()),
         }
     }
 }
@@ -163,4 +168,33 @@ pub fn modem_online(state: &AppState) -> (u16, Value) {
         Ok(resp) => (500, json!({"ok": false, "error": "AT+CFUN=1 failed", "raw": resp})),
         Err(e) => (503, json!({"ok": false, "error": e})),
     }
+}
+
+/// GET /api/system/top
+pub fn system_top(state: &AppState) -> (u16, Value) {
+    let result = state.proc_tracker.sample();
+    (200, json!({"ok": true, "data": result}))
+}
+
+/// POST /api/system/kill-bloat — body: {"all": true} or {"pids": [1, 2, 3]}
+pub fn system_kill_bloat(_state: &AppState, body: &[u8]) -> (u16, Value) {
+    let parsed: Value = match serde_json::from_slice(body) {
+        Ok(v) => v,
+        Err(_) => return (400, json!({"ok": false, "error": "invalid JSON"})),
+    };
+
+    let pids: Option<Vec<u32>> = if parsed["all"].as_bool() == Some(true) {
+        None
+    } else if let Some(arr) = parsed["pids"].as_array() {
+        let ids: Vec<u32> = arr.iter().filter_map(|v| v.as_u64().map(|n| n as u32)).collect();
+        if ids.is_empty() {
+            return (400, json!({"ok": false, "error": "pids array is empty"}));
+        }
+        Some(ids)
+    } else {
+        return (400, json!({"ok": false, "error": "expected 'all' or 'pids'"}));
+    };
+
+    let result = system::kill_bloat(pids.as_deref());
+    (200, json!({"ok": true, "data": result}))
 }

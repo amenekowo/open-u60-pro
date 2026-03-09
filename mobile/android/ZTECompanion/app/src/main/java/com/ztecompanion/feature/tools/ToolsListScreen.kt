@@ -26,6 +26,8 @@ fun ToolsListScreen(
     onNavigateToUSBMode: () -> Unit,
     onNavigateToSpeedTest: () -> Unit,
     onNavigateToLANSpeedTest: () -> Unit,
+    onNavigateToSMSForward: () -> Unit,
+    onNavigateToProcessList: () -> Unit,
     onNavigateToPlaceholder: (String) -> Unit,
 ) {
     Scaffold(
@@ -78,6 +80,12 @@ fun ToolsListScreen(
                 onClick = onNavigateToScheduler,
             )
             ToolItem(
+                icon = Icons.Default.ForwardToInbox,
+                title = "SMS Forwarding",
+                subtitle = "Auto-forward SMS to Telegram, webhooks, etc.",
+                onClick = onNavigateToSMSForward,
+            )
+            ToolItem(
                 icon = Icons.Default.Usb,
                 title = "USB Mode",
                 subtitle = "USB mode and powerbank control",
@@ -94,6 +102,12 @@ fun ToolsListScreen(
                 title = "LAN Speed Test",
                 subtitle = "Test WiFi link to router",
                 onClick = onNavigateToLANSpeedTest,
+            )
+            ToolItem(
+                icon = Icons.Default.Memory,
+                title = "Process Monitor",
+                subtitle = "View processes, kill bloat daemons",
+                onClick = onNavigateToProcessList,
             )
 
             Spacer(modifier = Modifier.height(8.dp))

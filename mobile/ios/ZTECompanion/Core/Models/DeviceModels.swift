@@ -578,3 +578,54 @@ enum DeviceParser {
         return nil
     }
 }
+
+// MARK: - Process Monitor
+
+struct ProcessInfo: Codable, Identifiable {
+    let pid: Int
+    let name: String
+    let cpuPct: Double
+    let rssKb: Int
+    let state: String
+    let isBloat: Bool
+    var id: Int { pid }
+
+    enum CodingKeys: String, CodingKey {
+        case pid, name, state
+        case cpuPct = "cpu_pct"
+        case rssKb = "rss_kb"
+        case isBloat = "is_bloat"
+    }
+}
+
+struct ProcessListResponse: Codable {
+    let processes: [ProcessInfo]
+    let totalCount: Int
+    let bloatCount: Int
+    let bloatCpuPct: Double
+    let bloatRssKb: Int
+
+    enum CodingKeys: String, CodingKey {
+        case processes
+        case totalCount = "total_count"
+        case bloatCount = "bloat_count"
+        case bloatCpuPct = "bloat_cpu_pct"
+        case bloatRssKb = "bloat_rss_kb"
+    }
+}
+
+struct KillBloatResponse: Codable {
+    let killed: [KilledProcess]
+    let skipped: [KilledProcess]
+    let freedRssKb: Int
+
+    enum CodingKeys: String, CodingKey {
+        case killed, skipped
+        case freedRssKb = "freed_rss_kb"
+    }
+}
+
+struct KilledProcess: Codable {
+    let pid: Int
+    let name: String
+}

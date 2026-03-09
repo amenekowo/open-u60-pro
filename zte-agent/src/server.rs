@@ -13,6 +13,7 @@ use crate::network_ext;
 use crate::router;
 use crate::sim;
 use crate::sms;
+use crate::sms_forward;
 use crate::speedtest;
 use crate::telephony;
 use crate::usb;
@@ -21,13 +22,10 @@ use crate::wifi;
 pub fn start(bind: &str, threads: usize, state: Arc<AppState>) {
     let server = match Server::http(bind) {
         Ok(s) => s,
-        Err(e) => {
-            eprintln!("Failed to bind {bind}: {e}");
+        Err(_) => {
             std::process::exit(1);
         }
     };
-    eprintln!("zte-agent listening on http://{bind}");
-
     // Seed the CPU tracker with initial sample (speed tracker self-seeds)
     state.cpu.sample();
 
@@ -41,8 +39,7 @@ pub fn start(bind: &str, threads: usize, state: Arc<AppState>) {
             loop {
                 let request = match server.recv() {
                     Ok(r) => r,
-                    Err(e) => {
-                        eprintln!("recv error: {e}");
+                    Err(_) => {
                         continue;
                     }
                 };
@@ -150,6 +147,9 @@ pub fn route(method: &Method, path: &str, state: &AppState, body: &[u8]) -> (u16
         (&Method::Put, "/api/device/power-save") => device_ext::device_power_save_set(state, body),
         (&Method::Get, "/api/device/fast-boot") => device_ext::device_fast_boot_get(state),
         (&Method::Put, "/api/device/fast-boot") => device_ext::device_fast_boot_set(state, body),
+        // System — process monitor
+        (&Method::Get, "/api/system/top") => handlers::system_top(state),
+        (&Method::Post, "/api/system/kill-bloat") => handlers::system_kill_bloat(state, body),
         // WiFi
         (&Method::Get, "/api/wifi/status") => wifi::wifi_status(state),
         (&Method::Put, "/api/wifi/settings") => wifi::wifi_set(state, body),
@@ -174,6 +174,16 @@ pub fn route(method: &Method, path: &str, state: &AppState, body: &[u8]) -> (u16
         (&Method::Post, "/api/sms/send") => sms::sms_send(state, body),
         (&Method::Post, "/api/sms/delete") => sms::sms_delete(state, body),
         (&Method::Post, "/api/sms/read") => sms::sms_mark_read(state, body),
+        // SMS forwarding
+        (&Method::Get, "/api/sms/forward/config") => sms_forward::config_get(state),
+        (&Method::Put, "/api/sms/forward/config") => sms_forward::config_set(state, body),
+        (&Method::Post, "/api/sms/forward/rules") => sms_forward::rules_create(state, body),
+        (&Method::Put, "/api/sms/forward/rules") => sms_forward::rules_update(state, body),
+        (&Method::Delete, "/api/sms/forward/rules") => sms_forward::rules_delete(state, body),
+        (&Method::Put, "/api/sms/forward/rules/toggle") => sms_forward::rules_toggle(state, body),
+        (&Method::Post, "/api/sms/forward/test") => sms_forward::test_forward(state, body),
+        (&Method::Get, "/api/sms/forward/log") => sms_forward::log_get(state),
+        (&Method::Post, "/api/sms/forward/log/clear") => sms_forward::log_clear(state),
         // SIM
         (&Method::Get, "/api/sim/info") => sim::sim_info(state),
         (&Method::Get, "/api/sim/imei") => sim::sim_imei(state),

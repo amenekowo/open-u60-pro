@@ -43,7 +43,15 @@ pub fn uci_get(key: &str) -> Result<String, String> {
 }
 
 /// Run `uci set <key>=<value>` followed by `uci commit <config>`.
+#[allow(dead_code)]
 pub fn uci_set(key: &str, value: &str) -> Result<(), String> {
+    uci_set_no_commit(key, value)?;
+    let config = key.split('.').next().unwrap_or(key);
+    uci_commit(config)
+}
+
+/// Run `uci set <key>=<value>` without committing.
+pub fn uci_set_no_commit(key: &str, value: &str) -> Result<(), String> {
     let set_out = Command::new("uci")
         .args(["set", &format!("{key}={value}")])
         .output()
@@ -54,8 +62,11 @@ pub fn uci_set(key: &str, value: &str) -> Result<(), String> {
             String::from_utf8_lossy(&set_out.stderr)
         ));
     }
-    // Commit the config section (first component of key)
-    let config = key.split('.').next().unwrap_or(key);
+    Ok(())
+}
+
+/// Run `uci commit <config>`.
+pub fn uci_commit(config: &str) -> Result<(), String> {
     let commit_out = Command::new("uci")
         .args(["commit", config])
         .output()

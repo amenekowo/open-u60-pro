@@ -130,8 +130,8 @@ struct DashboardView: View {
                     .presentationDetents([.medium])
             }
             .sheet(isPresented: $showCPUDetailSheet) {
-                CPUDetailSheet(systemInfo: viewModel.systemInfo, thermal: viewModel.thermal)
-                    .presentationDetents([.medium])
+                CPUDetailSheet(systemInfo: viewModel.systemInfo, thermal: viewModel.thermal, client: client)
+                    .presentationDetents([.large, .medium])
             }
             .navigationTitle("Dashboard")
             .refreshable { await viewModel.refresh() }

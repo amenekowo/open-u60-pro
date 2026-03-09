@@ -13,6 +13,11 @@ struct ToolsListView: View {
                     } label: {
                         Label("Automations", systemImage: "clock.arrow.2.circlepath")
                     }
+                    NavigationLink {
+                        SMSForwardConfigView(viewModel: SMSForwardViewModel(client: client, authManager: authManager))
+                    } label: {
+                        Label("SMS Forwarding", systemImage: "envelope.arrow.triangle.branch")
+                    }
                 }
 
                 Section("Network Tools") {

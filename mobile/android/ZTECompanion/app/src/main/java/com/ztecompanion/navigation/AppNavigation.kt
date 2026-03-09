@@ -47,9 +47,13 @@ import com.ztecompanion.feature.router.schedule.ScheduleRebootScreen
 import com.ztecompanion.feature.router.signaldetect.SignalDetectScreen
 import com.ztecompanion.feature.scheduler.SchedulerFormScreen
 import com.ztecompanion.feature.scheduler.SchedulerListScreen
+import com.ztecompanion.feature.sms.forward.SMSForwardConfigScreen
+import com.ztecompanion.feature.sms.forward.SMSForwardLogScreen
+import com.ztecompanion.feature.sms.forward.SMSForwardRuleFormScreen
 import com.ztecompanion.feature.tools.EnableADBScreen
 import com.ztecompanion.feature.tools.PlaceholderScreen
 import com.ztecompanion.feature.tools.ToolsListScreen
+import com.ztecompanion.feature.tools.process.ProcessListScreen
 import com.ztecompanion.feature.tools.speedtest.LANSpeedTestScreen
 import com.ztecompanion.feature.tools.speedtest.SpeedTestScreen
 import com.ztecompanion.feature.usb.USBModeScreen
@@ -82,6 +86,7 @@ sealed class Screen(val route: String) {
     data object ConfigTool : Screen("config_tool")
     data object SpeedTest : Screen("tools/speed_test")
     data object LANSpeedTest : Screen("tools/lan_speed_test")
+    data object ProcessList : Screen("tools/process_list")
 
     // Router settings sub-screens
     data object MobileNetwork : Screen("router/mobile_network")
@@ -106,6 +111,11 @@ sealed class Screen(val route: String) {
     data object SignalDetect : Screen("router/signal_detect")
     data object ScheduleReboot : Screen("router/schedule_reboot")
     data object DoHCache : Screen("router/doh_cache")
+
+    // SMS Forwarding
+    data object SMSForwardConfig : Screen("sms/forward/config")
+    data object SMSForwardRuleForm : Screen("sms/forward/rule_form")
+    data object SMSForwardLog : Screen("sms/forward/log")
 
     data object Placeholder : Screen("placeholder/{title}") {
         fun createRoute(title: String) = "placeholder/$title"
@@ -180,6 +190,7 @@ fun AppNavigation() {
                     },
                     onNavigateToCompose = { navController.navigate(Screen.SMSCompose.route) },
                     onNavigateToLogin = { navController.navigate(Screen.Login.route) },
+                    onNavigateToForwardConfig = { navController.navigate(Screen.SMSForwardConfig.route) },
                 )
             }
             composable(Screen.Router.route) {
@@ -215,6 +226,8 @@ fun AppNavigation() {
                     onNavigateToUSBMode = { navController.navigate(Screen.USBMode.route) },
                     onNavigateToSpeedTest = { navController.navigate(Screen.SpeedTest.route) },
                     onNavigateToLANSpeedTest = { navController.navigate(Screen.LANSpeedTest.route) },
+                    onNavigateToSMSForward = { navController.navigate(Screen.SMSForwardConfig.route) },
+                    onNavigateToProcessList = { navController.navigate(Screen.ProcessList.route) },
                     onNavigateToPlaceholder = { title ->
                         navController.navigate(Screen.Placeholder.createRoute(title))
                     },
@@ -274,6 +287,9 @@ fun AppNavigation() {
             }
             composable(Screen.LANSpeedTest.route) {
                 LANSpeedTestScreen(onBack = { navController.popBackStack() })
+            }
+            composable(Screen.ProcessList.route) {
+                ProcessListScreen(onBack = { navController.popBackStack() })
             }
 
             // Router settings sub-screens
@@ -336,6 +352,19 @@ fun AppNavigation() {
             }
             composable(Screen.SchedulerForm.route) {
                 SchedulerFormScreen(onBack = { navController.popBackStack() })
+            }
+            composable(Screen.SMSForwardConfig.route) {
+                SMSForwardConfigScreen(
+                    onBack = { navController.popBackStack() },
+                    onNavigateToForm = { navController.navigate(Screen.SMSForwardRuleForm.route) },
+                    onNavigateToLog = { navController.navigate(Screen.SMSForwardLog.route) },
+                )
+            }
+            composable(Screen.SMSForwardRuleForm.route) {
+                SMSForwardRuleFormScreen(onBack = { navController.popBackStack() })
+            }
+            composable(Screen.SMSForwardLog.route) {
+                SMSForwardLogScreen(onBack = { navController.popBackStack() })
             }
             composable(Screen.USBMode.route) {
                 USBModeScreen(onBack = { navController.popBackStack() })

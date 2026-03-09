@@ -4,6 +4,7 @@ mod cell;
 mod charge_policy;
 mod device_ext;
 pub mod doh;
+mod event_bus;
 mod handlers;
 mod lan_test;
 mod modem_ext;
@@ -13,6 +14,7 @@ mod scheduler;
 mod server;
 mod sim;
 mod sms;
+mod sms_forward;
 mod speedtest;
 mod system;
 mod telephony;
@@ -22,6 +24,7 @@ mod wifi;
 
 use std::sync::Arc;
 
+use event_bus::EventBus;
 use handlers::AppState;
 
 const DEFAULT_BIND: &str = "0.0.0.0:9090";
@@ -39,14 +42,18 @@ fn main() {
     // Set password from environment if provided
     if let Ok(pw) = std::env::var("ZTE_AGENT_PASSWORD") {
         state.auth.set_password(&pw);
-        eprintln!("Auth enabled (password from ZTE_AGENT_PASSWORD)");
-    } else {
-        eprintln!("Warning: No ZTE_AGENT_PASSWORD set — auth disabled");
     }
+
+    // Event bus: single `ubus listen` process dispatches to subscribers
+    let event_bus = EventBus::new();
+    let sms_rx = event_bus.subscribe("zwrt_wms_status_event");
+    let charger_rx = event_bus.subscribe("BSP_CHARGER_EVENT");
+    event_bus.start();
 
     state.doh.auto_start();
     state.scheduler.start(Arc::clone(&state));
-    state.charge_limit.start();
+    state.charge_limit.start(charger_rx);
+    state.sms_forward.start(sms_rx);
 
     server::start(&bind, threads, state);
 }

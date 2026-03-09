@@ -26,6 +26,7 @@ fun SMSListScreen(
     onNavigateToConversation: (String) -> Unit,
     onNavigateToCompose: () -> Unit,
     onNavigateToLogin: () -> Unit,
+    onNavigateToForwardConfig: () -> Unit = {},
     viewModel: SMSViewModel = hiltViewModel(),
 ) {
     val conversations by viewModel.conversations.collectAsState()
@@ -40,6 +41,16 @@ fun SMSListScreen(
     }
 
     Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Messages") },
+                actions = {
+                    IconButton(onClick = onNavigateToForwardConfig) {
+                        Icon(Icons.Default.Settings, contentDescription = "Forwarding settings")
+                    }
+                },
+            )
+        },
         floatingActionButton = {
             if (authState == AuthState.LOGGED_IN) {
                 FloatingActionButton(onClick = onNavigateToCompose) {

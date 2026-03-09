@@ -53,6 +53,13 @@ struct SMSListView: View {
                 }
             }
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    NavigationLink {
+                        SMSForwardConfigView(viewModel: SMSForwardViewModel(client: client, authManager: authManager))
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     HStack(spacing: 16) {
                         Button {

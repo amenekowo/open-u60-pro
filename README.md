@@ -15,6 +15,7 @@ config backup/decryption, network customization, and more.
 [![Platform](https://img.shields.io/badge/device-ZTE%20U60%20Pro%20(MU5250)-orange.svg)]()
 [![Qualcomm](https://img.shields.io/badge/chipset-Snapdragon%20X75-red.svg)]()
 [![OS](https://img.shields.io/badge/firmware-ZWRT%20(OpenWrt%2023.05)-green.svg)]()
+[![Website](https://img.shields.io/badge/website-open--u60--pro.vercel.app-blue.svg)](https://open-u60-pro.vercel.app)
 
 </div>
 
@@ -63,7 +64,7 @@ A lightweight Rust HTTP server that runs directly on the router (port 9090, LAN-
 cargo build --release --target aarch64-unknown-linux-musl -p zte-agent
 ```
 
-**131 endpoints across 14 categories:**
+**143 endpoints across 16 categories:**
 
 | Category | # | Capabilities |
 |---|---|---|
@@ -80,6 +81,8 @@ cargo build --release --target aarch64-unknown-linux-musl -p zte-agent
 | Speed Test | 4 | Server list, run test, progress tracking |
 | DoH Proxy | 6 | DNS-over-HTTPS proxy, cache management |
 | LAN Test | 3 | WiFi ping, download/upload throughput measurement |
+| SMS Forwarding | 9 | Auto-forward rules, CRUD, test, log management |
+| System | 2 | Process list, kill bloatware |
 | Scheduler | 5 | Scheduled/recurring jobs for any API action |
 
 ### Mobile Companion Apps
@@ -97,16 +100,16 @@ Native apps that connect directly over WiFi -- no computer needed.
 
 ## Why Use This Instead of the Official ZTE App?
 
-The stock ZTE U60 Pro runs **49 proprietary daemons** consuming **233 MB of RAM** just for device management. Many of these are unnecessary (TR-069 remote management, MQTT telemetry, Samba, NFC, diagnostics) and phone home to ZTE servers.
+The stock ZTE U60 Pro runs **44 proprietary daemons** consuming **225 MB of RAM** just for device management. Many of these are unnecessary (TR-069 remote management, MQTT telemetry, Samba, NFC, diagnostics) and phone home to ZTE servers.
 
-`zte-agent` replaces the need for the official ZTE management app with a single 2 MB binary:
+`zte-agent` replaces the need for the official ZTE management app with a single ~2.3 MB binary:
 
 | | zte-agent | ZTE Official Stack |
 |---|---|---|
-| **Processes** | 1 | 49 |
-| **Memory (RSS)** | 1.5 MB | 233 MB |
-| **Binary size** | 2 MB | ~50+ MB combined |
-| **Threads** | 12 | ~130+ |
+| **Processes** | 1 | 44 |
+| **Memory (RSS)** | ~0.8 MB | 225 MB |
+| **Binary size** | ~2.3 MB | ~50+ MB combined |
+| **Threads** | ~10 | ~130+ |
 | **Telemetry** | None | Phones home to `iot.zte.com.cn` etc. |
 | **App** | Open-source native iOS/Android | Closed-source, Chinese-only |
 
@@ -120,7 +123,7 @@ The official ZTE stack's top memory consumers:
 | `zte_topsw_tr069` + subs | 23.2 MB | ISP remote management |
 | `zte_topsw_diag` | 7.1 MB | Diagnostics/logging |
 
-zte-agent provides equivalent API access to the same underlying ubus/AT services using **0.65% of the memory** -- freeing ~230 MB of RAM for actual routing and WiFi workloads.
+zte-agent provides equivalent API access to the same underlying ubus/AT services using **0.35% of the memory** -- freeing ~224 MB of RAM for actual routing and WiFi workloads.
 
 ## Device Impact
 
@@ -255,8 +258,12 @@ u60-Pro-rs/
         │                      settings, signal, sms, tools, usb
         └── navigation/        NavHost + bottom bar
 
-├── web/                       WebUSB bootstrap tool (open-u60-pro.vercel.app)
-│   └── index.html             Single-page setup wizard
+├── web/                       Landing page & web dashboard (open-u60-pro.vercel.app)
+│   ├── src/
+│   │   ├── app/               Next.js app router (page, layout, globals)
+│   │   ├── components/        Landing sections, UI primitives
+│   │   └── data/              Feature data, API endpoints, device specs
+│   └── public/                Static assets (images, icons)
 ```
 
 ## Signal Thresholds

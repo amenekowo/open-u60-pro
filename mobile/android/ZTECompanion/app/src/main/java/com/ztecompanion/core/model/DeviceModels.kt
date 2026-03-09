@@ -485,3 +485,33 @@ object DeviceParser {
         else -> false
     }
 }
+
+// MARK: - Process Monitor
+
+data class ProcessInfo(
+    val pid: Int,
+    val name: String,
+    val cpuPct: Double,
+    val rssKb: Long,
+    val state: String,
+    val isBloat: Boolean,
+)
+
+data class ProcessListResponse(
+    val processes: List<ProcessInfo>,
+    val totalCount: Int,
+    val bloatCount: Int,
+    val bloatCpuPct: Double,
+    val bloatRssKb: Long,
+)
+
+data class KilledProcess(
+    val pid: Int,
+    val name: String,
+)
+
+data class KillBloatResponse(
+    val killed: List<KilledProcess>,
+    val skipped: List<KilledProcess>,
+    val freedRssKb: Long,
+)

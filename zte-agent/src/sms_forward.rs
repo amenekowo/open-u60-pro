@@ -135,6 +135,12 @@ pub struct ForwardLogEntry {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(default)]
+    pub rule_id: u32,
+    #[serde(default)]
+    pub content: String,
+    #[serde(default)]
+    pub date: String,
 }
 
 // ── SMS message from ubus ───────────────────────────────────────────
@@ -397,13 +403,13 @@ fn forward_to(
                 "sms_time": format_sms_time(),
                 "id": "-1",
             });
-            ubus::call(
+            let resp = ubus::call(
                 "zwrt_wms",
                 "zte_libwms_send_sms",
                 Some(&params.to_string()),
             )
             .map_err(|e| format!("sms forward: {e}"))?;
-            Ok(())
+            check_sms_send_result(&resp)
         }
         ForwardDestination::Ntfy { url, topic, token } => {
             let full_url = format!("{}/{}", url.trim_end_matches('/'), topic);
@@ -421,7 +427,7 @@ fn forward_to(
             let text = format_message(sms);
             // Discord has 2000 char limit
             let text = if text.len() > 2000 {
-                format!("{}...", &text[..1997])
+                format!("{}...", &text[..text.floor_char_boundary(1997)])
             } else {
                 text
             };
@@ -446,12 +452,27 @@ fn forward_to(
 }
 
 fn check_http_status(status: u16, dest: &str) -> Result<(), String> {
-    if status >= 200 && status < 300 {
+    if (200..300).contains(&status) {
         Ok(())
-    } else if status >= 400 && status < 500 {
+    } else if status == 429 {
+        Err(format!("{dest}: HTTP 429 rate limited"))
+    } else if (400..500).contains(&status) {
         Err(format!("{dest}: HTTP {status} (permanent error)"))
     } else {
         Err(format!("{dest}: HTTP {status}"))
+    }
+}
+
+/// Check ZTE SMS send response. result=3 means success, anything else is failure.
+fn check_sms_send_result(resp: &Value) -> Result<(), String> {
+    let result = resp
+        .get("result")
+        .and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok())));
+    match result {
+        Some(3) | None => Ok(()),
+        Some(code) => Err(format!(
+            "sms forward: device rejected (result={code}) (permanent error)"
+        )),
     }
 }
 
@@ -611,6 +632,8 @@ impl SmsForwarder {
                 continue;
             }
 
+            let mut all_succeeded = true;
+
             for (i, rule) in enabled_rules.iter().enumerate() {
                 // Skip firmware echo: sender matches destination AND content is garbled
                 if is_forward_loop(&rule.destination, &sms.sender) && is_garbled_echo(&sms.content) {
@@ -623,6 +646,10 @@ impl SmsForwarder {
 
                 let result = forward_with_retry(&rule.destination, sms, &agent);
 
+                if result.is_err() {
+                    all_succeeded = false;
+                }
+
                 let entry = ForwardLogEntry {
                     timestamp: now_ts(),
                     sms_id: sms.id,
@@ -632,6 +659,9 @@ impl SmsForwarder {
                     destination_type: destination_type_name(&rule.destination).to_string(),
                     success: result.is_ok(),
                     error: result.err(),
+                    rule_id: rule.id,
+                    content: sms.content.clone(),
+                    date: sms.date.clone(),
                 };
 
                 let mut state = self.state.lock().unwrap();
@@ -652,20 +682,24 @@ impl SmsForwarder {
                 max_processed_id = sms.id;
             }
 
-            // Post-forward actions
-            if config.mark_read_after_forward {
-                let _ = ubus::call(
+            // Post-forward actions — only when ALL rules succeeded
+            if all_succeeded && config.mark_read_after_forward {
+                if let Err(e) = ubus::call(
                     "zwrt_wms",
                     "zwrt_wms_modify_tag",
                     Some(&json!({"id": sms.id.to_string(), "tag": 0}).to_string()),
-                );
+                ) {
+                    eprintln!("[sms_forward] mark-read failed for SMS {}: {e}", sms.id);
+                }
             }
-            if config.delete_after_forward {
-                let _ = ubus::call(
+            if all_succeeded && config.delete_after_forward {
+                if let Err(e) = ubus::call(
                     "zwrt_wms",
                     "zwrt_wms_delete_sms",
                     Some(&json!({"id": sms.id.to_string()}).to_string()),
-                );
+                ) {
+                    eprintln!("[sms_forward] delete failed for SMS {}: {e}", sms.id);
+                }
             }
 
             // Delay between different SMS messages
@@ -683,7 +717,7 @@ fn preview(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
     } else {
-        format!("{}...", &s[..max.min(s.len())])
+        format!("{}...", &s[..s.floor_char_boundary(max)])
     }
 }
 
@@ -698,6 +732,12 @@ fn forward_with_retry(
         match forward_to(dest, sms, agent) {
             Ok(()) => return Ok(()),
             Err(e) => {
+                eprintln!(
+                    "[sms_forward] attempt {}/{MAX_RETRIES} failed for SMS {} -> {}: {e}",
+                    attempt + 1,
+                    sms.id,
+                    destination_type_name(dest),
+                );
                 if !is_transient_error(&e) {
                     return Err(e);
                 }
@@ -709,7 +749,7 @@ fn forward_with_retry(
         }
     }
 
-    Err(last_err)
+    Err(format!("{last_err} (failed after {MAX_RETRIES} retries)"))
 }
 
 // ── ubus helpers ────────────────────────────────────────────────────
@@ -733,7 +773,7 @@ fn fetch_new_messages(after_id: u64) -> Result<Vec<DecodedSms>, String> {
         "tags": 1,
         "page": 0,
         "data_per_page": 50,
-        "mem_store": 1,
+        "mem_store": 2,
         "order_by": "order by id desc",
     });
     let data = ubus::call(
@@ -807,7 +847,7 @@ fn fetch_max_sms_id() -> Result<u64, String> {
         "tags": 10,
         "page": 0,
         "data_per_page": 5,
-        "mem_store": 1,
+        "mem_store": 2,
         "order_by": "order by id desc",
     });
     let data = ubus::call(
@@ -1053,10 +1093,12 @@ pub fn test_forward(state: &AppState, body: &[u8]) -> (u16, Value) {
     }
 }
 
-/// GET /api/sms/forward/log
+/// GET /api/sms/forward/log — returns newest-first
 pub fn log_get(state: &AppState) -> (u16, Value) {
     let fwd_state = state.sms_forward.state.lock().unwrap();
-    (200, json!({"ok": true, "data": fwd_state.log}))
+    let mut log = fwd_state.log.clone();
+    log.reverse();
+    (200, json!({"ok": true, "data": log}))
 }
 
 /// POST /api/sms/forward/log/clear
@@ -1065,4 +1107,77 @@ pub fn log_clear(state: &AppState) -> (u16, Value) {
     fwd_state.log.clear();
     save_state(&fwd_state);
     (200, json!({"ok": true}))
+}
+
+/// POST /api/sms/forward/retry — Retry a failed forward log entry
+pub fn retry_forward(state: &AppState, body: &[u8]) -> (u16, Value) {
+    #[derive(Deserialize)]
+    struct Req {
+        index: usize,
+    }
+
+    let req: Req = match serde_json::from_slice(body) {
+        Ok(v) => v,
+        Err(e) => return (400, json!({"ok": false, "error": format!("invalid JSON: {e}")})),
+    };
+
+    // Convert reversed index (newest-first) to internal chronological index
+    let (entry_clone, rule_id, internal_index) = {
+        let fwd_state = state.sms_forward.state.lock().unwrap();
+        let internal_index = match fwd_state.log.len().checked_sub(1 + req.index) {
+            Some(i) => i,
+            None => return (404, json!({"ok": false, "error": "log entry not found"})),
+        };
+        let entry = match fwd_state.log.get(internal_index) {
+            Some(e) => e,
+            None => return (404, json!({"ok": false, "error": "log entry not found"})),
+        };
+        if entry.success {
+            return (400, json!({"ok": false, "error": "entry already succeeded"}));
+        }
+        (entry.clone(), entry.rule_id, internal_index)
+    };
+
+    // Look up rule by id from current config
+    let dest = {
+        let config = state.sms_forward.config.lock().unwrap();
+        match config.rules.iter().find(|r| r.id == rule_id) {
+            Some(rule) => rule.destination.clone(),
+            None => return (404, json!({"ok": false, "error": "rule no longer exists"})),
+        }
+    };
+
+    // Reconstruct the SMS from stored log data
+    let sms = DecodedSms {
+        id: entry_clone.sms_id,
+        sender: entry_clone.sender.clone(),
+        content: entry_clone.content.clone(),
+        date: entry_clone.date.clone(),
+    };
+
+    // Single attempt — no auto-retry for manual retries
+    let agent = http_agent();
+    let result = forward_to(&dest, &sms, &agent);
+
+    // Update the log entry
+    let mut fwd_state = state.sms_forward.state.lock().unwrap();
+    if let Some(entry) = fwd_state.log.get_mut(internal_index) {
+        match &result {
+            Ok(()) => {
+                entry.success = true;
+                entry.error = None;
+                entry.timestamp = now_ts();
+            }
+            Err(e) => {
+                entry.error = Some(e.clone());
+                entry.timestamp = now_ts();
+            }
+        }
+    }
+    save_state(&fwd_state);
+
+    match result {
+        Ok(()) => (200, json!({"ok": true, "data": {"status": "sent"}})),
+        Err(e) => (502, json!({"ok": false, "error": e})),
+    }
 }

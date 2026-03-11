@@ -184,6 +184,7 @@ pub fn route(method: &Method, path: &str, state: &AppState, body: &[u8]) -> (u16
         (&Method::Post, "/api/sms/forward/test") => sms_forward::test_forward(state, body),
         (&Method::Get, "/api/sms/forward/log") => sms_forward::log_get(state),
         (&Method::Post, "/api/sms/forward/log/clear") => sms_forward::log_clear(state),
+        (&Method::Post, "/api/sms/forward/retry") => sms_forward::retry_forward(state, body),
         // SIM
         (&Method::Get, "/api/sim/info") => sim::sim_info(state),
         (&Method::Get, "/api/sim/imei") => sim::sim_imei(state),

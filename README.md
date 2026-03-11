@@ -96,7 +96,7 @@ Native apps that connect directly over WiFi -- no computer needed.
 | **Dependencies** | None (Apple frameworks only) | OkHttp, Hilt, Vico, kotlinx.serialization |
 | **Features** | BandLock, Call, Clients, Config, Dashboard, DeviceInfo, Login, RouterSettings, Scheduler, Signal, SIM/STK/USSD, SMS, Tools, USBMode | BandLock, Clients, Config, Dashboard, DeviceInfo, Login, RouterSettings, Scheduler, Signal, SIM/STK, SMS, Tools, USBMode |
 | **Tabs** | Dashboard, SMS, Tools, Router, Settings | Dashboard, SMS, Tools, Router, Settings |
-| **Path** | `mobile/ios/ZTECompanion/` (109 Swift files) | `mobile/android/ZTECompanion/` (90 Kotlin files) |
+| **Path** | `mobile/ios/OpenU60/` (109 Swift files) | `mobile/android/OpenU60/` (90 Kotlin files) |
 
 ## Why Use This Instead of the Official ZTE App?
 
@@ -201,7 +201,7 @@ This builds, deploys the binary to the device via SSH (port 2222), updates the b
 ### Connect Mobile App
 
 1. Connect your phone to the router's WiFi
-2. Open ZTE Companion app
+2. Open OpenU60 app
 3. Set agent URL: `http://192.168.0.1:9090`
 4. Enter the agent password you set above
 
@@ -216,7 +216,7 @@ u60-Pro-rs/
 │
 └── mobile/                    Native companion apps
     ├── README.md              Mobile apps documentation
-    ├── ios/ZTECompanion/      SwiftUI app
+    ├── ios/OpenU60/           SwiftUI app
     │   ├── Core/              Networking, crypto, models
     │   ├── Features/
     │   │   ├── BandLock/      Band locking
@@ -251,7 +251,7 @@ u60-Pro-rs/
     │   │   ├── Tools/         Band lock, clients, config, etc.
     │   │   └── USBMode/       USB mode detection/switching
     │   └── Navigation/        5-tab bar (Dashboard, SMS, Tools, Router, Settings)
-    └── android/ZTECompanion/  Jetpack Compose app
+    └── android/OpenU60/       Jetpack Compose app
         ├── core/              Network, crypto, models, DI
         ├── feature/           bandlock, clients, config, dashboard,
         │                      deviceinfo, login, router, scheduler,

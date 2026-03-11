@@ -1,6 +1,6 @@
-# ZTE Companion — Mobile Apps for ZTE U60 Pro (MU5250)
+# OpenU60 — Mobile Apps for ZTE U60 Pro (MU5250)
 
-Native companion apps for the ZTE U60 Pro 5G mobile router. Connect to the `zte-agent` REST API running on the router over WiFi — no ADB required.
+Native companion apps for the ZTE U60 Pro 5G mobile router. Connect to the `zte-agent` REST API running on the router over WiFi -- no ADB required.
 
 ## Features
 
@@ -48,7 +48,7 @@ The iOS app communicates with `zte-agent`, a lightweight Rust HTTP server deploy
 
 ## iOS App
 
-**Path**: `ios/ZTECompanion/`
+**Path**: `ios/OpenU60/`
 
 ### Requirements
 
@@ -71,8 +71,8 @@ The iOS app communicates with `zte-agent`, a lightweight Rust HTTP server deploy
 ### Project Structure
 
 ```
-ios/ZTECompanion/
-├── ZTECompanionApp.swift                  App entry point
+ios/OpenU60/
+├── OpenU60App.swift                  App entry point
 ├── Core/
 │   ├── Networking/
 │   │   ├── AgentClient.swift              REST client (getJSON/postJSON/putJSON)

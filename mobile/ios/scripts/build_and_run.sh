@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ============================================================================
-# ZTECompanion — Build & Run on iOS Device or Simulator
+# OpenU60 — Build & Run on iOS Device or Simulator
 # ============================================================================
 # Usage:
 #   ./scripts/build_and_run.sh [--skip-generate] [--build-only] [--clean] [--no-logs] [--device <id>] [--simulator [name|udid]]
@@ -20,7 +20,7 @@ set -euo pipefail
 
 # --- Resolve project root from script location ------------------------------
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../ZTECompanion" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../OpenU60" && pwd)"
 cd "$PROJECT_ROOT"
 
 # --- Load .env if present ----------------------------------------------------
@@ -32,9 +32,9 @@ if [[ -f "$ENV_FILE" ]]; then
 fi
 
 # --- Constants ---------------------------------------------------------------
-SCHEME="ZTECompanion"
-XCODEPROJ="ZTECompanion.xcodeproj"
-BUNDLE_ID="com.ztecompanion.app"
+SCHEME="OpenU60"
+XCODEPROJ="OpenU60.xcodeproj"
+BUNDLE_ID="com.openu60.app"
 TEAM_ID="${TEAM_ID:-}"
 
 # --- Colors ------------------------------------------------------------------
@@ -478,7 +478,7 @@ fi
 
 # --- Team ID check (required for physical device builds) --------------------
 if ! $USE_SIMULATOR && [[ -z "$TEAM_ID" ]]; then
-  fail "TEAM_ID not set. Export it or add to ZTECompanion/.env (see .env.example)"
+  fail "TEAM_ID not set. Export it or add to OpenU60/.env (see .env.example)"
 fi
 
 # --- Device / simulator selection (before build) ----------------------------
@@ -494,9 +494,9 @@ fi
 echo ""
 echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════╗${NC}"
 if $USE_SIMULATOR; then
-echo -e "${BOLD}${CYAN}║    ZTECompanion — Build & Run (Sim)      ║${NC}"
+echo -e "${BOLD}${CYAN}║    OpenU60 — Build & Run (Sim)            ║${NC}"
 else
-echo -e "${BOLD}${CYAN}║    ZTECompanion — Build & Run            ║${NC}"
+echo -e "${BOLD}${CYAN}║    OpenU60 — Build & Run                 ║${NC}"
 fi
 echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════╝${NC}"
 echo ""

@@ -8,6 +8,7 @@ const CMD_CLSE = 0x45534c43;
 const AUTH_RSAPUBLICKEY = 3;
 const VERSION = 0x01000001;
 const MAX_DATA = 256 * 1024;
+const USB_TIMEOUT_MS = 10_000;
 
 interface ADBMessage {
   cmd: number;
@@ -68,11 +69,28 @@ export class ADBClient {
   private localIdCounter = 0;
 
   private async send(data: Uint8Array): Promise<void> {
-    await this.device!.transferOut(this.epOut!, data as unknown as BufferSource);
+    const result = await Promise.race([
+      this.device!.transferOut(this.epOut!, data as unknown as BufferSource),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(
+          "USB transfer timed out. Device not responding — try replugging the USB cable."
+        )), USB_TIMEOUT_MS)
+      ),
+    ]);
+    if (result.status !== "ok") {
+      throw new Error("USB write failed: " + result.status);
+    }
   }
 
   private async recv(): Promise<ArrayBuffer> {
-    const result = await this.device!.transferIn(this.epIn!, 64 * 1024);
+    const result = await Promise.race([
+      this.device!.transferIn(this.epIn!, 64 * 1024),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(
+          "USB transfer timed out. Device not responding — try replugging the USB cable."
+        )), USB_TIMEOUT_MS)
+      ),
+    ]);
     return result.data!.buffer as ArrayBuffer;
   }
 
@@ -104,12 +122,16 @@ export class ADBClient {
   }
 
   async connect(): Promise<void> {
-    this.device = await navigator.usb.requestDevice({
+    const device = await navigator.usb.requestDevice({
       filters: [
         { classCode: 0xff, subclassCode: 0x42, protocolCode: 0x01 },
       ],
     });
+    await this.connectDevice(device);
+  }
 
+  async connectDevice(device: USBDevice): Promise<void> {
+    this.device = device;
     await this.device.open();
 
     if (this.device.configuration === null) {

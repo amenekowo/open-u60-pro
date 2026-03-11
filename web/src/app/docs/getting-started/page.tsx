@@ -114,7 +114,7 @@ sudo apt install android-tools-adb`}
         <h2 className="mb-3 text-lg font-semibold">Connect Mobile App</h2>
         <ol className="list-inside list-decimal space-y-2 text-sm text-text-dim">
           <li>Connect your phone to the router&apos;s WiFi</li>
-          <li>Open ZTE Companion app</li>
+          <li>Open OpenU60 app</li>
           <li>
             Set agent URL:{" "}
             <code className="rounded bg-bg-card px-1.5 py-0.5 font-mono text-xs text-accent">

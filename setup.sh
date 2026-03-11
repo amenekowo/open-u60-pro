@@ -23,24 +23,138 @@ BINARY_CHANGED=false
 
 # ── Step 0: Prerequisites ───────────────────────────────────────────
 info "Checking prerequisites..."
-MISSING=()
-for cmd in adb cargo curl python3 aarch64-linux-musl-gcc; do
-    command -v "$cmd" >/dev/null 2>&1 || MISSING+=("$cmd")
-done
-if [ ${#MISSING[@]} -ne 0 ]; then
-    fail "Missing required tools: ${MISSING[*]}
-  Install them before running this script:
-    adb                       — Android SDK Platform Tools
-                                macOS: brew install android-platform-tools
-                                Linux: sudo apt install android-tools-adb
-    cargo                     — Rust toolchain (https://rustup.rs)
-    aarch64-linux-musl-gcc    — musl cross-linker
-                                macOS: brew install filosottile/musl-cross/musl-cross
-                                Linux: sudo apt install musl-tools gcc-aarch64-linux-gnu
-    curl                      — HTTP client (usually pre-installed)
-    python3                   — Python 3 (usually pre-installed)"
+
+OS="$(uname -s)"
+HAS_BREW=false
+HAS_APT=false
+command -v brew >/dev/null 2>&1 && HAS_BREW=true
+command -v apt-get >/dev/null 2>&1 && HAS_APT=true
+
+# Cross-compiler tool varies by platform
+if [ "$OS" = "Darwin" ]; then
+    CROSS_CC="aarch64-linux-musl-gcc"
+else
+    CROSS_CC="aarch64-linux-gnu-gcc"
 fi
 
+# Dependency table: cmd | brew_pkg | apt_pkg | custom_install
+DEPS=(
+    "curl|curl|curl|"
+    "python3|python3|python3|"
+    "adb|android-platform-tools|android-tools-adb|"
+    "cargo|||curl --proto =https --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
+    "$CROSS_CC|filosottile/musl-cross/musl-cross|gcc-aarch64-linux-gnu musl-tools|"
+)
+
+MISSING_CMDS=()
+MISSING_INSTALLS=()
+ALL_OK=true
+
+# Returns 0 if every missing tool has a resolved install command
+all_have_installers() {
+    for i in "${!MISSING_CMDS[@]}"; do
+        [ -z "${MISSING_INSTALLS[$i]}" ] && return 1
+    done
+    return 0
+}
+
+for entry in "${DEPS[@]}"; do
+    IFS='|' read -r cmd brew_pkg apt_pkg custom <<< "$entry"
+    if command -v "$cmd" >/dev/null 2>&1; then
+        echo -e "  ${GREEN}✓${NC} $cmd"
+    else
+        echo -e "  ${RED}✗${NC} $cmd"
+        ALL_OK=false
+        MISSING_CMDS+=("$cmd")
+
+        # Determine install command
+        install_cmd=""
+        if [ -n "$custom" ]; then
+            install_cmd="$custom"
+        elif [ "$OS" = "Darwin" ] && [ "$HAS_BREW" = true ] && [ -n "$brew_pkg" ]; then
+            install_cmd="brew install $brew_pkg"
+        elif [ "$OS" != "Darwin" ] && [ "$HAS_APT" = true ] && [ -n "$apt_pkg" ]; then
+            install_cmd="sudo apt-get install -y $apt_pkg"
+        fi
+        MISSING_INSTALLS+=("$install_cmd")
+    fi
+done
+
+if [ "$ALL_OK" = false ]; then
+    # On macOS without brew, offer to install it first
+    if [ "$OS" = "Darwin" ] && [ "$HAS_BREW" = false ]; then
+        echo ""
+        warn "Homebrew not found. It's needed to install dependencies on macOS."
+        echo -e "${CYAN}Install Homebrew now? (y/N)${NC}"
+        read -r INSTALL_BREW
+        if [ "$INSTALL_BREW" = "y" ] || [ "$INSTALL_BREW" = "Y" ]; then
+            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            # Source brew shellenv for current session
+            if [ -x /opt/homebrew/bin/brew ]; then
+                eval "$(/opt/homebrew/bin/brew shellenv)"
+            elif [ -x /usr/local/bin/brew ]; then
+                eval "$(/usr/local/bin/brew shellenv)"
+            fi
+            HAS_BREW=true
+            # Re-evaluate install commands now that brew is available
+            for i in "${!MISSING_CMDS[@]}"; do
+                if [ -z "${MISSING_INSTALLS[$i]}" ]; then
+                    for entry in "${DEPS[@]}"; do
+                        IFS='|' read -r cmd brew_pkg _ _ <<< "$entry"
+                        if [ "$cmd" = "${MISSING_CMDS[$i]}" ] && [ -n "$brew_pkg" ]; then
+                            MISSING_INSTALLS[$i]="brew install $brew_pkg"
+                            break
+                        fi
+                    done
+                fi
+            done
+        else
+            fail "Homebrew is required on macOS. Install it from https://brew.sh"
+        fi
+    fi
+
+    if ! all_have_installers; then
+        echo ""
+        echo "Cannot auto-install all dependencies. Please install manually:"
+        for i in "${!MISSING_CMDS[@]}"; do
+            if [ -z "${MISSING_INSTALLS[$i]}" ]; then
+                echo "  ${MISSING_CMDS[$i]} — no auto-install available for this platform"
+            fi
+        done
+        exit 1
+    fi
+
+    echo ""
+    echo "The following will be installed:"
+    for i in "${!MISSING_CMDS[@]}"; do
+        echo "  ${MISSING_CMDS[$i]}  →  ${MISSING_INSTALLS[$i]}"
+    done
+    echo ""
+    echo -e "${CYAN}Install all missing dependencies now? (y/N)${NC}"
+    read -r DO_INSTALL
+    if [ "$DO_INSTALL" != "y" ] && [ "$DO_INSTALL" != "Y" ]; then
+        fail "Missing dependencies: ${MISSING_CMDS[*]}. Install them and re-run."
+    fi
+
+    for i in "${!MISSING_CMDS[@]}"; do
+        info "Installing ${MISSING_CMDS[$i]}..."
+        if ! eval "${MISSING_INSTALLS[$i]}"; then
+            fail "Failed to install ${MISSING_CMDS[$i]}."
+        fi
+        # Source cargo env if we just installed rustup
+        if [ "${MISSING_CMDS[$i]}" = "cargo" ] && [ -f "$HOME/.cargo/env" ]; then
+            # shellcheck disable=SC1091
+            source "$HOME/.cargo/env"
+        fi
+        if command -v "${MISSING_CMDS[$i]}" >/dev/null 2>&1; then
+            ok "${MISSING_CMDS[$i]} installed."
+        else
+            fail "Failed to install ${MISSING_CMDS[$i]}."
+        fi
+    done
+fi
+
+# Ensure Rust cross-compilation target is installed
 if ! rustup target list --installed 2>/dev/null | grep -q aarch64-unknown-linux-musl; then
     info "Adding Rust cross-compilation target..."
     rustup target add aarch64-unknown-linux-musl

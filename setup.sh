@@ -8,9 +8,22 @@ ok()    { echo -e "${GREEN}[+]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[!]${NC} $1"; }
 fail()  { echo -e "${RED}[-]${NC} $1" >&2; exit 1; }
 
-# ── Usage ────────────────────────────────────────────────────────────
-ROUTER_PASSWORD="${1:?Usage: ./setup.sh <router-password> <agent-password>}"
-AGENT_PASSWORD="${2:?Usage: ./setup.sh <router-password> <agent-password>}"
+# ── Password input ──────────────────────────────────────────────────
+if [ $# -ge 2 ]; then
+    ROUTER_PASSWORD="$1"
+    AGENT_PASSWORD="$2"
+elif [ $# -eq 0 ]; then
+    echo -e "${CYAN}Router admin password:${NC} "
+    read -rs ROUTER_PASSWORD; echo
+    echo -e "${CYAN}Agent API password:${NC} "
+    read -rs AGENT_PASSWORD; echo
+    [ -z "$ROUTER_PASSWORD" ] && fail "Router password cannot be empty."
+    [ -z "$AGENT_PASSWORD" ] && fail "Agent password cannot be empty."
+else
+    echo "Usage: ./setup.sh [router-password agent-password]"
+    echo "       ./setup.sh    (interactive — prompts for passwords)"
+    exit 1
+fi
 
 GATEWAY=192.168.0.1
 AGENT_PORT=9090
@@ -20,6 +33,21 @@ BINARY=target/$TARGET/release/zte-agent
 REMOTE_BIN=/data/zte-agent
 STARTUP_SCRIPT=/data/local/tmp/start_zte_agent.sh
 BINARY_CHANGED=false
+DOWNLOAD_URL="https://github.com/jesther-ai/open-u60-pro/releases/latest/download/zte-agent"
+
+# ── Binary source menu ──────────────────────────────────────────────
+echo ""
+echo -e "${CYAN}How would you like to get the zte-agent binary?${NC}"
+echo "  1) Download pre-built from GitHub (recommended — no dev tools needed)"
+echo "  2) Build from source (requires Rust toolchain)"
+echo ""
+echo -n "Choice [1]: "
+read -r BUILD_CHOICE
+BUILD_CHOICE="${BUILD_CHOICE:-1}"
+
+if [ "$BUILD_CHOICE" != "1" ] && [ "$BUILD_CHOICE" != "2" ]; then
+    fail "Invalid choice. Enter 1 or 2."
+fi
 
 # ── Step 0: Prerequisites ───────────────────────────────────────────
 info "Checking prerequisites..."
@@ -38,13 +66,22 @@ else
 fi
 
 # Dependency table: cmd | brew_pkg | apt_pkg | custom_install
-DEPS=(
-    "curl|curl|curl|"
-    "python3|python3|python3|"
-    "adb|android-platform-tools|android-tools-adb|"
-    "cargo|||curl --proto =https --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
-    "$CROSS_CC|filosottile/musl-cross/musl-cross|gcc-aarch64-linux-gnu musl-tools|"
-)
+# Build path needs all deps; download path only needs curl, python3, adb
+if [ "$BUILD_CHOICE" = "1" ]; then
+    DEPS=(
+        "curl|curl|curl|"
+        "python3|python3|python3|"
+        "adb|android-platform-tools|android-tools-adb|"
+    )
+else
+    DEPS=(
+        "curl|curl|curl|"
+        "python3|python3|python3|"
+        "adb|android-platform-tools|android-tools-adb|"
+        "cargo|||curl --proto =https --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
+        "$CROSS_CC|filosottile/musl-cross/musl-cross|gcc-aarch64-linux-gnu musl-tools|"
+    )
+fi
 
 MISSING_CMDS=()
 MISSING_INSTALLS=()
@@ -79,6 +116,9 @@ for entry in "${DEPS[@]}"; do
         MISSING_INSTALLS+=("$install_cmd")
     fi
 done
+
+# For download path, ADB is only needed if SSH isn't set up — defer check
+# (we'll check SSH reachability later and skip ADB requirement if SSH works)
 
 if [ "$ALL_OK" = false ]; then
     # On macOS without brew, offer to install it first
@@ -154,10 +194,12 @@ if [ "$ALL_OK" = false ]; then
     done
 fi
 
-# Ensure Rust cross-compilation target is installed
-if ! rustup target list --installed 2>/dev/null | grep -q aarch64-unknown-linux-musl; then
-    info "Adding Rust cross-compilation target..."
-    rustup target add aarch64-unknown-linux-musl
+# Ensure Rust cross-compilation target is installed (build path only)
+if [ "$BUILD_CHOICE" = "2" ]; then
+    if ! rustup target list --installed 2>/dev/null | grep -q aarch64-unknown-linux-musl; then
+        info "Adding Rust cross-compilation target..."
+        rustup target add aarch64-unknown-linux-musl
+    fi
 fi
 ok "All prerequisites found."
 
@@ -184,6 +226,30 @@ ubus_call() {
     curl -sf "http://$GATEWAY/ubus/?t=$ts" \
         -H 'Content-Type: application/json' \
         -d "[{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"call\",\"params\":[\"$session\",\"$object\",\"$method\",$params]}]"
+}
+
+# ── Helper: timeout (macOS-compatible) ───────────────────────────────
+# macOS doesn't have GNU timeout; use a portable fallback
+wait_with_timeout() {
+    local secs="$1"; shift
+    if command -v timeout >/dev/null 2>&1; then
+        timeout "$secs" "$@"
+    else
+        # Portable fallback: run in background with a timer
+        "$@" &
+        local pid=$!
+        local i=0
+        while [ "$i" -lt "$secs" ]; do
+            if ! kill -0 "$pid" 2>/dev/null; then
+                wait "$pid"
+                return $?
+            fi
+            sleep 1
+            i=$((i + 1))
+        done
+        kill "$pid" 2>/dev/null
+        return 124
+    fi
 }
 
 # ── Transport detection ──────────────────────────────────────────────
@@ -244,17 +310,8 @@ except Exception:
 
     # Wait for ADB device
     info "Waiting for ADB device (plug USB cable if not connected)..."
-    if ! timeout 30 adb wait-for-device 2>/dev/null; then
-        adb wait-for-device &
-        ADB_PID=$!
-        for i in $(seq 1 30); do
-            if ! kill -0 "$ADB_PID" 2>/dev/null; then break; fi
-            sleep 1
-        done
-        if kill -0 "$ADB_PID" 2>/dev/null; then
-            kill "$ADB_PID" 2>/dev/null
-            fail "ADB device not found after 30s. Check USB connection."
-        fi
+    if ! wait_with_timeout 30 adb wait-for-device 2>/dev/null; then
+        fail "ADB device not found after 30s. Check USB connection."
     fi
     ok "ADB device connected."
 fi
@@ -278,10 +335,26 @@ rpush() {
     fi
 }
 
-# ── Step 3: Build zte-agent ─────────────────────────────────────────
-info "Building zte-agent (this may take a few minutes on first run)..."
-cargo build --release --target "$TARGET" -p zte-agent
-ok "Build complete."
+# ── Step 3: Get zte-agent binary ─────────────────────────────────────
+if [ "$BUILD_CHOICE" = "1" ]; then
+    info "Downloading zte-agent from GitHub releases..."
+    mkdir -p "$(dirname "$BINARY")"
+    if ! curl -sfL "$DOWNLOAD_URL" -o "$BINARY"; then
+        fail "Download failed. Check your internet connection or try: $DOWNLOAD_URL"
+    fi
+    # Verify download
+    FILE_SIZE=$(wc -c < "$BINARY" | tr -d ' ')
+    if [ "$FILE_SIZE" -lt 1000 ]; then
+        rm -f "$BINARY"
+        fail "Downloaded file is too small ($FILE_SIZE bytes) — likely not a valid binary. Check the release page."
+    fi
+    chmod +x "$BINARY"
+    ok "Downloaded zte-agent ($FILE_SIZE bytes)."
+else
+    info "Building zte-agent (this may take a few minutes on first run)..."
+    cargo build --release --target "$TARGET" -p zte-agent
+    ok "Build complete."
+fi
 
 # ── Step 4: Push binary ─────────────────────────────────────────────
 info "Checking zte-agent binary..."

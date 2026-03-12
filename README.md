@@ -138,7 +138,7 @@ zte-agent provides equivalent API access to the same underlying ubus/AT services
 └── local/tmp/
     ├── start_zte_agent.sh          <- agent boot script
     ├── dropbear                    <- SSH binary (if installed)
-    └── start_ssh.sh               <- SSH boot script (if installed)
+    └── start_dropbear.sh          <- SSH boot script (if installed)
 
 /etc/                               (read-only rootfs)
 ├── rc.local                        <- boot hooks appended here

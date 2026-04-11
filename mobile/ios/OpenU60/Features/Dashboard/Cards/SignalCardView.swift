@@ -4,11 +4,13 @@ struct SignalCardView: View {
     let operatorInfo: OperatorInfo
     let nrSignal: NRSignal
     let lteSignal: LTESignal
+    var wcdmaSignal: WCDMASignal = .empty
     var isAirplaneMode: Bool = false
 
     var body: some View {
         let showNR = operatorInfo.showNR(nr: nrSignal)
         let showLTE = operatorInfo.showLTE(lte: lteSignal)
+        let show3G = operatorInfo.show3G(nr: nrSignal, lte: lteSignal, wcdma: wcdmaSignal)
 
         CardView {
             VStack(alignment: .leading, spacing: 8) {
@@ -20,7 +22,8 @@ struct SignalCardView: View {
                         icon: "antenna.radiowaves.left.and.right", tech: "5G NR",
                         band: nrSignal.band, freq: BandConfig.nrFrequency(band: nrSignal.band),
                         technology: .nr, bandwidth: nrSignal.bandwidth,
-                        isSCC: false, rsrp: nrSignal.rsrp, sinr: nrSignal.sinr,
+                        isSCC: false, isPCC: !nrSignal.sccCarriers.isEmpty,
+                        rsrp: nrSignal.rsrp, sinr: nrSignal.sinr,
                         pci: nrSignal.pci
                     )
                     ForEach(nrSignal.sccCarriers) { scc in
@@ -28,7 +31,7 @@ struct SignalCardView: View {
                             icon: "antenna.radiowaves.left.and.right", tech: "5G NR",
                             band: scc.band, freq: BandConfig.nrFrequency(band: scc.band),
                             technology: .nr, bandwidth: scc.bandwidth,
-                            isSCC: true, rsrp: scc.rsrp, sinr: scc.sinr,
+                            isSCC: true, anchorLabel: nil, rsrp: scc.rsrp, sinr: scc.sinr,
                             pci: scc.pci
                         )
                     }
@@ -36,11 +39,14 @@ struct SignalCardView: View {
 
                 if showLTE {
                     if showNR { Divider() }
+                    let lteCaActive = lteSignal.caState != "0" && !lteSignal.sccCarriers.isEmpty
                     carrierRow(
                         icon: "cellularbars", tech: "LTE",
                         band: lteSignal.band, freq: BandConfig.lteFrequency(band: lteSignal.band),
                         technology: .lte, bandwidth: lteSignal.bandwidth,
-                        isSCC: false, rsrp: lteSignal.rsrp, sinr: lteSignal.sinr,
+                        isSCC: false, isPCC: !showNR && lteCaActive,
+                        anchorLabel: showNR ? "Anchor" : nil,
+                        rsrp: lteSignal.rsrp, sinr: lteSignal.sinr,
                         pci: lteSignal.pci
                     )
                     if lteSignal.caState != "0" {
@@ -49,14 +55,19 @@ struct SignalCardView: View {
                                 icon: "cellularbars", tech: "LTE",
                                 band: scc.band, freq: BandConfig.lteFrequency(band: scc.band),
                                 technology: .lte, bandwidth: scc.bandwidth,
-                                isSCC: true, rsrp: scc.rsrp, sinr: scc.sinr,
+                                isSCC: true, anchorLabel: nil, rsrp: scc.rsrp, sinr: scc.sinr,
                                 pci: scc.pci
                             )
                         }
                     }
                 }
 
-                if !showNR && !showLTE {
+                if show3G {
+                    if showNR || showLTE { Divider() }
+                    wcdmaRow
+                }
+
+                if !showNR && !showLTE && !show3G {
                     if isAirplaneMode {
                         Label("Airplane Mode", systemImage: "airplane")
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -72,6 +83,7 @@ struct SignalCardView: View {
             .animation(.smooth, value: lteSignal.sccCarriers.map(\.id))
             .animation(.smooth, value: showNR)
             .animation(.smooth, value: showLTE)
+            .animation(.smooth, value: show3G)
         }
     }
 
@@ -79,7 +91,8 @@ struct SignalCardView: View {
     private func carrierRow(
         icon: String, tech: String, band: String, freq: String?,
         technology: BandTechnology, bandwidth: String,
-        isSCC: Bool, rsrp: Double?, sinr: Double?, pci: String
+        isSCC: Bool, isPCC: Bool = false, anchorLabel: String? = nil,
+        rsrp: Double?, sinr: Double?, pci: String
     ) -> some View {
         let spec = technology.spec(for: band)
         VStack(alignment: .leading, spacing: 4) {
@@ -107,6 +120,22 @@ struct SignalCardView: View {
                         .padding(.vertical, 1)
                         .background(.secondary.opacity(0.15), in: Capsule())
                         .foregroundStyle(.secondary)
+                }
+                if isPCC {
+                    Text("PCC")
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(.blue.opacity(0.15), in: Capsule())
+                        .foregroundStyle(.blue)
+                }
+                if let anchorLabel {
+                    Text(anchorLabel)
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(.orange.opacity(0.15), in: Capsule())
+                        .foregroundStyle(.orange)
                 }
                 Spacer()
             }
@@ -143,6 +172,29 @@ struct SignalCardView: View {
             return "BW \(bwNum) MHz"
         }
         return nil
+    }
+
+    @ViewBuilder
+    private var wcdmaRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Label("3G WCDMA", systemImage: "antenna.radiowaves.left.and.right.circle")
+                    .font(.subheadline)
+                Spacer()
+            }
+            HStack {
+                Text("RSCP")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                animatedDB(wcdmaSignal.rscp, font: .body.weight(.bold), color: Color.rscpColor(wcdmaSignal.rscp))
+                Spacer()
+                Text("Ec/Io")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                animatedDB(wcdmaSignal.ecio, font: .body, color: Color.ecioColor(wcdmaSignal.ecio))
+            }
+        }
+        .transition(.opacity.combined(with: .move(edge: .top)))
     }
 
     @ViewBuilder

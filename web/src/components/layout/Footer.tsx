@@ -75,14 +75,6 @@ export function Footer() {
               </li>
               <li>
                 <Link
-                  href="/setup"
-                  className="text-[0.8125rem] text-text-dim transition-colors hover:text-text"
-                >
-                  Setup Wizard
-                </Link>
-              </li>
-              <li>
-                <Link
                   href="/privacy"
                   className="text-[0.8125rem] text-text-dim transition-colors hover:text-text"
                 >

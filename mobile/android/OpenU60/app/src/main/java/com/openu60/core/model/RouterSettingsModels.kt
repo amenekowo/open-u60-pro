@@ -10,11 +10,12 @@ data class NetworkModeConfig(
     companion object {
         val empty = NetworkModeConfig()
         val netSelectOptions = listOf(
-            "Auto (5G + LTE)" to "WL_AND_5G",
-            "5G Only" to "Only_5G",
-            "LTE Only" to "Only_LTE",
+            "Auto" to "WL_AND_5G",
+            "5G NSA (LTE + NR)" to "LTE_AND_5G",
+            "5G SA Only" to "Only_5G",
+            "4G Only" to "Only_LTE",
+            "4G + 3G" to "WCDMA_AND_LTE",
             "3G Only" to "Only_WCDMA",
-            "2G Only" to "Only_GSM",
         )
     }
 }

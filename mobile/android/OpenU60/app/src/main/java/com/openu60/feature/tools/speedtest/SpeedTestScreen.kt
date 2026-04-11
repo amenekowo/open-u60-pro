@@ -14,6 +14,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.openu60.core.components.AnimatedNumber
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -95,10 +96,13 @@ fun SpeedTestScreen(
                                     modifier = Modifier.size(36.dp),
                                 )
                             }
-                            Text(
-                                String.format("%.1f", state.liveSpeedMbps),
-                                fontSize = 48.sp,
-                                fontWeight = FontWeight.Bold,
+                            AnimatedNumber(
+                                value = state.liveSpeedMbps,
+                                decimalPlaces = 1,
+                                style = MaterialTheme.typography.displaySmall.copy(
+                                    fontSize = 48.sp,
+                                    fontWeight = FontWeight.Bold,
+                                ),
                                 color = MaterialTheme.colorScheme.primary,
                             )
                         }
@@ -134,8 +138,9 @@ fun SpeedTestScreen(
                             modifier = Modifier.fillMaxWidth(),
                         )
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            "${state.progress}%",
+                        AnimatedNumber(
+                            value = state.progress,
+                            suffix = "%",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

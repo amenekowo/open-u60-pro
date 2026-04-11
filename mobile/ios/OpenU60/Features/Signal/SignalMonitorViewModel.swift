@@ -55,7 +55,8 @@ final class SignalMonitorViewModel {
             let snapshot = SignalSnapshot(
                 timestamp: Date(),
                 nrRSRP: nr.rsrp,
-                lteRSRP: lte.rsrp
+                lteRSRP: lte.rsrp,
+                wcdmaRSCP: wcdma.rscp
             )
             history.append(snapshot)
             if history.count > maxHistoryPoints {

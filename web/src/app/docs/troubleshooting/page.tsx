@@ -4,7 +4,7 @@ import { CodeBlock } from "@/components/ui/CodeBlock";
 
 export const metadata: Metadata = {
   title: "Troubleshooting",
-  description: "Common issues and solutions for zte-agent and WebUSB setup.",
+  description: "Common issues and solutions for zte-agent.",
 };
 
 export default function TroubleshootingPage() {
@@ -18,49 +18,6 @@ export default function TroubleshootingPage() {
           Common issues and how to resolve them.
         </p>
       </div>
-
-      <section>
-        <h2 className="mb-3 text-lg font-semibold">
-          WebUSB Not Available
-        </h2>
-        <p className="mb-3 text-sm text-text-dim">
-          The setup wizard requires WebUSB, which is only supported in
-          Chromium-based browsers (Chrome, Edge, Brave, Opera) on desktop.
-        </p>
-        <Callout type="warning">
-          Safari, Firefox, and all mobile browsers do not support WebUSB. Use
-          the CLI setup method instead.
-        </Callout>
-      </section>
-
-      <section>
-        <h2 className="mb-3 text-lg font-semibold">
-          ADB Device Not Found
-        </h2>
-        <p className="mb-3 text-sm text-text-dim">
-          If the browser doesn&apos;t show your device in the USB picker:
-        </p>
-        <ul className="list-inside list-disc space-y-1 text-sm text-text-dim">
-          <li>Ensure ADB was enabled successfully (step 2 completed)</li>
-          <li>Try a different USB-C cable (some cables are charge-only)</li>
-          <li>
-            Disconnect and reconnect the USB cable, then try again
-          </li>
-          <li>On macOS, check System Preferences &gt; Security for USB permissions</li>
-          <li>On Linux, you may need udev rules for the device</li>
-        </ul>
-      </section>
-
-      <section>
-        <h2 className="mb-3 text-lg font-semibold">
-          ADB Connection Handshake Failed
-        </h2>
-        <p className="mb-3 text-sm text-text-dim">
-          This usually means ADB mode wasn&apos;t enabled on the router. Go
-          back to step 1, verify your router password, and try again. The USB
-          mode switch needs to complete before connecting the cable.
-        </p>
-      </section>
 
       <section>
         <h2 className="mb-3 text-lg font-semibold">
@@ -83,12 +40,12 @@ export default function TroubleshootingPage() {
         </h2>
         <p className="mb-3 text-sm text-text-dim">
           Ensure you are connected to the router&apos;s WiFi or Ethernet.
-          The setup wizard communicates directly with the router at the gateway
+          The agent communicates directly with the router at the gateway
           IP (default: 192.168.0.1).
         </p>
         <p className="text-sm text-text-dim">
           If you&apos;ve changed the router&apos;s LAN IP, update the
-          Gateway IP field in the credentials form.
+          IP address in the companion app or API calls accordingly.
         </p>
       </section>
 
@@ -97,16 +54,16 @@ export default function TroubleshootingPage() {
           Agent Not Responding After Deploy
         </h2>
         <p className="mb-3 text-sm text-text-dim">
-          If the verify step fails after deployment:
+          If the agent isn&apos;t reachable at port 9090:
         </p>
         <ul className="list-inside list-disc space-y-1 text-sm text-text-dim">
-          <li>Wait 5-10 seconds and try refreshing</li>
+          <li>Wait 5-10 seconds and try again</li>
           <li>
-            Check if the agent is running via ADB:
+            Check if the agent is running via SSH:
           </li>
         </ul>
         <CodeBlock
-          code={`adb shell ps | grep zte-agent`}
+          code={`ssh -p 2222 root@192.168.0.1 'ps | grep zte-agent'`}
           language="bash"
           className="mt-2"
         />
@@ -114,8 +71,8 @@ export default function TroubleshootingPage() {
           If the process isn&apos;t running, check the boot script:
         </p>
         <CodeBlock
-          code={`adb shell cat /data/local/tmp/start_zte_agent.sh
-adb shell sh /data/local/tmp/start_zte_agent.sh`}
+          code={`ssh -p 2222 root@192.168.0.1 'cat /data/local/tmp/start_zte_agent.sh'
+ssh -p 2222 root@192.168.0.1 'sh /data/local/tmp/start_zte_agent.sh'`}
           language="bash"
           className="mt-2"
         />

@@ -1,4 +1,5 @@
 mod at_cmd;
+mod at_terminal;
 mod auth;
 mod cell;
 mod charge_policy;
@@ -48,12 +49,14 @@ fn main() {
     let event_bus = EventBus::new();
     let sms_rx = event_bus.subscribe("zwrt_wms_status_event");
     let charger_rx = event_bus.subscribe("BSP_CHARGER_EVENT");
+    let service_rx = event_bus.subscribe("zwrt_servicestatus");
+    let wan_status_rx = event_bus.subscribe("router_event_wan_connect_status");
     event_bus.start();
 
     state.doh.auto_start();
     state.scheduler.start(Arc::clone(&state));
     state.charge_limit.start(charger_rx);
-    state.sms_forward.start(sms_rx);
+    state.sms_forward.start(sms_rx, service_rx, wan_status_rx);
 
     server::start(&bind, threads, state);
 }

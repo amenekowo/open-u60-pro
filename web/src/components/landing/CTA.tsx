@@ -21,22 +21,22 @@ export function CTA() {
           Ready to get started?
         </h2>
         <p className="mx-auto mb-8 max-w-md text-text-dim">
-          Deploy the agent to your router in minutes — no command line
-          required.
+          Deploy the agent to your router and take full control of your
+          U60 Pro.
         </p>
         <div className="flex flex-wrap justify-center gap-3">
           <Link
-            href="/setup"
+            href="/docs"
             className="inline-flex items-center gap-2 rounded-lg bg-accent px-6 py-2.5 text-sm font-semibold text-white transition-all hover:bg-accent-hover hover:-translate-y-0.5"
           >
-            Launch Setup Wizard
+            Read the Docs
             <ArrowRight size={16} />
           </Link>
           <Link
-            href="/docs"
+            href="/download"
             className="inline-flex items-center gap-2 rounded-lg border border-border px-6 py-2.5 text-sm font-semibold text-text transition-all hover:border-text-dim hover:-translate-y-0.5"
           >
-            Read the Docs
+            Download
           </Link>
         </div>
       </motion.div>

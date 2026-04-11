@@ -8,11 +8,12 @@ struct NetworkModeConfig: Equatable {
     static let empty = NetworkModeConfig(netSelect: "WL_AND_5G")
 
     static let netSelectOptions: [(label: String, value: String)] = [
-        ("Auto (5G + LTE)", "WL_AND_5G"),
-        ("5G Only", "Only_5G"),
-        ("LTE Only", "Only_LTE"),
+        ("Auto", "WL_AND_5G"),
+        ("5G NSA (LTE + NR)", "LTE_AND_5G"),
+        ("5G SA Only", "Only_5G"),
+        ("4G Only", "Only_LTE"),
+        ("4G + 3G", "WCDMA_AND_LTE"),
         ("3G Only", "Only_WCDMA"),
-        ("2G Only", "Only_GSM")
     ]
 }
 

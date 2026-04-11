@@ -82,7 +82,7 @@ struct OperatorInfo: Equatable {
     var networkMode: NetworkMode {
         let raw = networkType.uppercased()
         if raw == "SA" || raw == "5G SA" || raw.contains("NR SA") { return .sa }
-        if raw == "NSA" || raw == "ENDC" || raw == "EN-DC" || raw.contains("NR NSA") { return .nsa }
+        if raw.contains("NSA") || raw == "ENDC" || raw == "EN-DC" { return .nsa }
         if raw.contains("LTE") || raw == "4G" || raw == "4G+" { return .lte }
         if raw.contains("WCDMA") || raw.contains("UMTS") || raw.contains("GSM")
             || raw.contains("2G") || raw.contains("3G") { return .legacy }
@@ -139,13 +139,15 @@ struct SignalSnapshot: Identifiable, Equatable {
     let timestamp: Date
     let nrRSRP: Double?
     let lteRSRP: Double?
+    let wcdmaRSCP: Double?
 
-    init(timestamp: Date, nrRSRP: Double?, lteRSRP: Double?) {
+    init(timestamp: Date, nrRSRP: Double?, lteRSRP: Double?, wcdmaRSCP: Double? = nil) {
         self.id = Self.nextID
         Self.nextID += 1
         self.timestamp = timestamp
         self.nrRSRP = nrRSRP
         self.lteRSRP = lteRSRP
+        self.wcdmaRSCP = wcdmaRSCP
     }
 }
 

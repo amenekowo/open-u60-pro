@@ -3,6 +3,7 @@ use std::sync::Arc;
 use serde_json::{json, Value};
 use tiny_http::{Header, Method, Request, Response, Server};
 
+use crate::at_terminal;
 use crate::cell;
 use crate::device_ext;
 use crate::lan_test;
@@ -281,6 +282,9 @@ pub fn route(method: &Method, path: &str, state: &AppState, body: &[u8]) -> (u16
         (&Method::Put, "/api/scheduler/jobs") => scheduler::jobs_update(state, body),
         (&Method::Delete, "/api/scheduler/jobs") => scheduler::jobs_delete(state, body),
         (&Method::Put, "/api/scheduler/jobs/toggle") => scheduler::jobs_toggle(state, body),
+        // AT terminal
+        (&Method::Post, "/api/at/send") => at_terminal::at_send(state, body),
+        (&Method::Get, "/api/at/port") => at_terminal::at_port(state),
         // Fallback
         _ => (404, json!({"ok": false, "error": "not found"})),
     }

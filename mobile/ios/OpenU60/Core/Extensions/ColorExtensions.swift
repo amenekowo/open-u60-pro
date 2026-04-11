@@ -63,4 +63,41 @@ extension Color {
         if rsrp >= -110 { return 1 }
         return 0
     }
+
+    /// Color based on RSCP (3G) signal strength thresholds.
+    static func rscpColor(_ rscp: Double?) -> Color {
+        guard let rscp = rscp else { return .gray }
+        if rscp >= -75 { return .green }
+        if rscp >= -85 { return .yellow }
+        if rscp >= -95 { return .orange }
+        return .red
+    }
+
+    /// Signal quality label for RSCP (3G).
+    static func rscpQuality(_ rscp: Double?) -> String {
+        guard let rscp = rscp else { return "No Signal" }
+        if rscp >= -75 { return "Excellent" }
+        if rscp >= -85 { return "Good" }
+        if rscp >= -95 { return "Fair" }
+        return "Poor"
+    }
+
+    /// Signal bars (0-4) from RSCP (3G).
+    static func rscpBars(_ rscp: Double?) -> Int {
+        guard let rscp = rscp else { return 0 }
+        if rscp >= -75 { return 4 }
+        if rscp >= -85 { return 3 }
+        if rscp >= -95 { return 2 }
+        if rscp >= -105 { return 1 }
+        return 0
+    }
+
+    /// Color based on Ec/Io (3G) thresholds.
+    static func ecioColor(_ ecio: Double?) -> Color {
+        guard let ecio = ecio else { return .gray }
+        if ecio >= -6 { return .green }
+        if ecio >= -10 { return .yellow }
+        if ecio >= -15 { return .orange }
+        return .red
+    }
 }

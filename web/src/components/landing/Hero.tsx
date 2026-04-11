@@ -49,7 +49,7 @@ export function Hero() {
         transition={{ duration: 0.6, delay: 0.3, ease: [0.16, 1, 0.3, 1] as const }}
       >
         <Link
-          href="/setup"
+          href="/docs"
           className="inline-flex items-center gap-2 rounded-lg bg-accent px-6 py-2.5 text-sm font-semibold text-white transition-all hover:bg-accent-hover hover:-translate-y-0.5"
         >
           Get Started

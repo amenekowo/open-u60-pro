@@ -53,6 +53,7 @@ import com.openu60.feature.sms.forward.SMSForwardRuleFormScreen
 import com.openu60.feature.tools.EnableADBScreen
 import com.openu60.feature.tools.PlaceholderScreen
 import com.openu60.feature.tools.ToolsListScreen
+import com.openu60.feature.tools.atterminal.ATTerminalScreen
 import com.openu60.feature.tools.process.ProcessListScreen
 import com.openu60.feature.tools.speedtest.LANSpeedTestScreen
 import com.openu60.feature.tools.speedtest.SpeedTestScreen
@@ -87,6 +88,7 @@ sealed class Screen(val route: String) {
     data object SpeedTest : Screen("tools/speed_test")
     data object LANSpeedTest : Screen("tools/lan_speed_test")
     data object ProcessList : Screen("tools/process_list")
+    data object ATTerminal : Screen("tools/at_terminal")
 
     // Router settings sub-screens
     data object MobileNetwork : Screen("router/mobile_network")
@@ -228,6 +230,7 @@ fun AppNavigation() {
                     onNavigateToLANSpeedTest = { navController.navigate(Screen.LANSpeedTest.route) },
                     onNavigateToSMSForward = { navController.navigate(Screen.SMSForwardConfig.route) },
                     onNavigateToProcessList = { navController.navigate(Screen.ProcessList.route) },
+                    onNavigateToATTerminal = { navController.navigate(Screen.ATTerminal.route) },
                     onNavigateToPlaceholder = { title ->
                         navController.navigate(Screen.Placeholder.createRoute(title))
                     },
@@ -290,6 +293,9 @@ fun AppNavigation() {
             }
             composable(Screen.ProcessList.route) {
                 ProcessListScreen(onBack = { navController.popBackStack() })
+            }
+            composable(Screen.ATTerminal.route) {
+                ATTerminalScreen(onBack = { navController.popBackStack() })
             }
 
             // Router settings sub-screens

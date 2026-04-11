@@ -20,7 +20,7 @@ impl AtPort {
         }
     }
 
-    fn detect(&self) -> Option<String> {
+    pub fn detect(&self) -> Option<String> {
         {
             let cached = self.cached.lock().unwrap();
             if let Some(ref port) = *cached {

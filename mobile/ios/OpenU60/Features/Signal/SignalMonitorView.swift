@@ -45,7 +45,7 @@ struct SignalMonitorView: View {
     private var rsrpChart: some View {
         CardView {
             VStack(alignment: .leading, spacing: 8) {
-                Text("RSRP History")
+                Text("Signal History")
                     .font(.headline)
 
                 if viewModel.history.isEmpty {
@@ -72,11 +72,20 @@ struct SignalMonitorView: View {
                                 .foregroundStyle(by: .value("Type", "LTE"))
                                 .interpolationMethod(.catmullRom)
                             }
+                            if show3G, let wcdmaRSCP = point.wcdmaRSCP {
+                                LineMark(
+                                    x: .value("Time", point.timestamp),
+                                    y: .value("dBm", wcdmaRSCP)
+                                )
+                                .foregroundStyle(by: .value("Type", "3G"))
+                                .interpolationMethod(.catmullRom)
+                            }
                         }
                     }
                     .chartForegroundStyleScale([
                         "NR": Color.blue,
                         "LTE": Color.orange,
+                        "3G": Color.purple,
                     ])
                     .chartYScale(domain: -140...(-40))
                     .chartYAxis {
@@ -145,7 +154,7 @@ struct SignalMonitorView: View {
                     Divider()
 
                     VStack(alignment: .leading, spacing: 4) {
-                        bandMetaRow(band: nr.band, technology: .nr)
+                        bandMetaRow(band: nr.band, technology: .nr, isPCC: nrCaActive)
                         metaRow("PCI", nr.pci)
                         metaRow("Cell ID", nr.cellID)
                         metaRow("Channel", nr.channel)
@@ -192,6 +201,14 @@ struct SignalMonitorView: View {
                 HStack {
                     Label("LTE", systemImage: "cellularbars")
                         .font(.headline)
+                    if showNR {
+                        Text("NSA Anchor")
+                            .font(.caption2.bold())
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.orange.opacity(0.15), in: Capsule())
+                            .foregroundStyle(.orange)
+                    }
                     if caActive {
                         Text("\(numCC) CC")
                             .font(.caption2.bold())
@@ -223,7 +240,7 @@ struct SignalMonitorView: View {
                     Divider()
 
                     VStack(alignment: .leading, spacing: 4) {
-                        bandMetaRow(band: lte.band, technology: .lte)
+                        bandMetaRow(band: lte.band, technology: .lte, isPCC: caActive)
                         metaRow("PCI", lte.pci)
                         metaRow("Cell ID", lte.cellID)
                         metaRow("EARFCN", lte.earfcn)
@@ -278,11 +295,19 @@ struct SignalMonitorView: View {
     private var wcdmaPanel: some View {
         CardView {
             VStack(alignment: .leading, spacing: 8) {
-                Label("WCDMA", systemImage: "antenna.radiowaves.left.and.right.circle")
-                    .font(.headline)
+                HStack {
+                    Label("WCDMA", systemImage: "antenna.radiowaves.left.and.right.circle")
+                        .font(.headline)
+                    Spacer()
+                    if viewModel.wcdmaSignal.isConnected {
+                        Text(Color.rscpQuality(viewModel.wcdmaSignal.rscp))
+                            .font(.caption.bold())
+                            .foregroundStyle(Color.rscpColor(viewModel.wcdmaSignal.rscp))
+                    }
+                }
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                    SignalMetricView(label: "RSCP", value: viewModel.wcdmaSignal.rscp, unit: "dBm", color: .primary)
-                    SignalMetricView(label: "Ec/Io", value: viewModel.wcdmaSignal.ecio, unit: "dB", color: .primary)
+                    SignalMetricView(label: "RSCP", value: viewModel.wcdmaSignal.rscp, unit: "dBm", color: Color.rscpColor(viewModel.wcdmaSignal.rscp))
+                    SignalMetricView(label: "Ec/Io", value: viewModel.wcdmaSignal.ecio, unit: "dB", color: Color.ecioColor(viewModel.wcdmaSignal.ecio))
                 }
             }
         }
@@ -290,15 +315,16 @@ struct SignalMonitorView: View {
 
     // MARK: - Helpers
 
-    private func bandMetaRow(band: String, technology: BandTechnology) -> some View {
+    private func bandMetaRow(band: String, technology: BandTechnology, isPCC: Bool = false) -> some View {
         let spec = technology.spec(for: band)
+        let pccSuffix = isPCC ? " · PCC" : ""
         let display: String
         if band.isEmpty {
             display = "--"
         } else if let spec {
-            display = "B\(band) (\(spec.commonName), \(spec.duplexMode.rawValue))"
+            display = "B\(band) (\(spec.commonName), \(spec.duplexMode.rawValue))\(pccSuffix)"
         } else {
-            display = "B\(band)"
+            display = "B\(band)\(pccSuffix)"
         }
         return metaRow("Band", display)
     }

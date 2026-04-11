@@ -1,5 +1,6 @@
 package com.openu60.feature.dashboard
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -15,6 +16,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.openu60.core.components.AnimatedNumber
 import com.openu60.core.model.DeviceParser
 import com.openu60.core.network.AuthState
 
@@ -199,6 +201,9 @@ fun DashboardScreen(
                     subtitle = signalSubtitle,
                     valueColor = rsrpColor(rsrp),
                     onClick = onNavigateToSignal,
+                    valueContent = if (rsrp != null) {
+                        { AnimatedNumber(value = rsrp.toInt(), suffix = " dBm", color = rsrpColor(rsrp), style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)) }
+                    } else null,
                 )
                 val chargingLabel = when (battery.charging) {
                     "charging" -> "Charging"
@@ -217,6 +222,7 @@ fun DashboardScreen(
                     value = "${battery.capacity}%",
                     subtitle = battSubtitle,
                     valueColor = batteryColor(battery.capacity),
+                    valueContent = { AnimatedNumber(value = battery.capacity, suffix = "%", color = batteryColor(battery.capacity), style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)) },
                 )
             }
 
@@ -226,6 +232,7 @@ fun DashboardScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 val cpuLabel = "%.0f%%".format(systemInfo.cpuUsagePercent)
+                val cpuColor = if (systemInfo.cpuUsagePercent > 80) Color(0xFFF44336) else Color.Unspecified
                 val uptimeStr = formatUptime(systemInfo.uptime)
                 DashboardCard(
                     modifier = Modifier.weight(1f),
@@ -233,14 +240,17 @@ fun DashboardScreen(
                     title = "CPU",
                     value = cpuLabel,
                     subtitle = "${thermal.cpuTemp.toInt()}\u00B0C  $uptimeStr",
-                    valueColor = if (systemInfo.cpuUsagePercent > 80) Color(0xFFF44336) else Color.Unspecified,
+                    valueColor = cpuColor,
+                    valueContent = { AnimatedNumber(value = systemInfo.cpuUsagePercent.toInt(), suffix = "%", color = cpuColor, style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)) },
                 )
+                val speedComp = DeviceParser.speedComponents(speed.downloadBytesPerSec)
                 DashboardCard(
                     modifier = Modifier.weight(1f),
                     icon = Icons.Default.SwapVert,
                     title = "Cellular",
                     value = DeviceParser.formatSpeed(speed.downloadBytesPerSec),
                     subtitle = DeviceParser.formatBytes(trafficStats.rxBytes + trafficStats.txBytes),
+                    valueContent = { AnimatedNumber(value = speedComp.number, decimalPlaces = speedComp.decimalPlaces, suffix = speedComp.unit, style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)) },
                 )
             }
 
@@ -315,11 +325,18 @@ fun DashboardScreen(
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                "${connectedDevices.size} Devices",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                AnimatedNumber(
+                                    value = connectedDevices.size,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Text(
+                                    " Devices",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                         Spacer(modifier = Modifier.height(8.dp))
                         connectedDevices.take(5).forEach { device ->
@@ -339,23 +356,145 @@ fun DashboardScreen(
                 }
             }
 
-            // NR band info
+            // NR band info with carriers
             val nrBand = nrSignal.band
             if (nrBand.isNotBlank()) {
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Text("NR Band", style = MaterialTheme.typography.labelMedium)
-                        Text(
-                            "n$nrBand",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        if (nrSignal.carrierAggregation.isNotBlank()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("NR Band", style = MaterialTheme.typography.labelMedium)
+                            if (nrSignal.sccCarriers.isNotEmpty()) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    "${1 + nrSignal.sccCarriers.size} CC",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF2196F3),
+                                    modifier = Modifier
+                                        .background(Color(0xFF2196F3).copy(alpha = 0.15f), shape = MaterialTheme.shapes.small)
+                                        .padding(horizontal = 5.dp, vertical = 1.dp),
+                                )
+                            }
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                "CA: ${nrSignal.sccCarriers.size} SCC",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                "n$nrBand",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
                             )
+                            if (nrSignal.sccCarriers.isNotEmpty()) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    "PCC",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF2196F3),
+                                    modifier = Modifier
+                                        .background(Color(0xFF2196F3).copy(alpha = 0.15f), shape = MaterialTheme.shapes.small)
+                                        .padding(horizontal = 5.dp, vertical = 1.dp),
+                                )
+                            }
+                        }
+                        nrSignal.sccCarriers.forEach { scc ->
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
+                                Text(
+                                    "n${scc.band}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    "SCC",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier
+                                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f), shape = MaterialTheme.shapes.small)
+                                        .padding(horizontal = 4.dp, vertical = 1.dp),
+                                )
+                                if (scc.rsrp != null) {
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("${scc.rsrp.toInt()} dBm", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // LTE band info with carriers
+            val lteBand = lteSignal.band
+            val lteCaActive = lteSignal.caState != "0" && lteSignal.sccCarriers.isNotEmpty()
+            val showNRBand = nrBand.isNotBlank()
+            if (lteBand.isNotBlank()) {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("LTE Band", style = MaterialTheme.typography.labelMedium)
+                            if (showNRBand) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    "Anchor",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFFF9800),
+                                    modifier = Modifier
+                                        .background(Color(0xFFFF9800).copy(alpha = 0.15f), shape = MaterialTheme.shapes.small)
+                                        .padding(horizontal = 5.dp, vertical = 1.dp),
+                                )
+                            }
+                            if (lteCaActive) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    "${1 + lteSignal.sccCarriers.size} CC",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFFF9800),
+                                    modifier = Modifier
+                                        .background(Color(0xFFFF9800).copy(alpha = 0.15f), shape = MaterialTheme.shapes.small)
+                                        .padding(horizontal = 5.dp, vertical = 1.dp),
+                                )
+                            }
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "B$lteBand",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            if (lteCaActive && !showNRBand) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    "PCC",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF2196F3),
+                                    modifier = Modifier
+                                        .background(Color(0xFF2196F3).copy(alpha = 0.15f), shape = MaterialTheme.shapes.small)
+                                        .padding(horizontal = 5.dp, vertical = 1.dp),
+                                )
+                            }
+                        }
+                        if (lteCaActive) {
+                            lteSignal.sccCarriers.forEach { scc ->
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
+                                    Text(
+                                        "B${scc.band}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        "SCC",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier
+                                            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f), shape = MaterialTheme.shapes.small)
+                                            .padding(horizontal = 4.dp, vertical = 1.dp),
+                                    )
+                                    if (scc.rsrp != null) {
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("${scc.rsrp.toInt()} dBm", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -374,6 +513,7 @@ private fun DashboardCard(
     subtitle: String,
     valueColor: Color = Color.Unspecified,
     onClick: (() -> Unit)? = null,
+    valueContent: (@Composable () -> Unit)? = null,
 ) {
     Card(
         modifier = modifier,
@@ -396,12 +536,16 @@ private fun DashboardCard(
                 )
             }
             Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                value,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                color = if (valueColor != Color.Unspecified) valueColor else MaterialTheme.colorScheme.onSurface,
-            )
+            if (valueContent != null) {
+                valueContent()
+            } else {
+                Text(
+                    value,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = if (valueColor != Color.Unspecified) valueColor else MaterialTheme.colorScheme.onSurface,
+                )
+            }
             Text(
                 subtitle,
                 style = MaterialTheme.typography.bodySmall,

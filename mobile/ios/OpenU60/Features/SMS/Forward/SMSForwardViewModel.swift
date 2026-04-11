@@ -186,6 +186,17 @@ final class SMSForwardViewModel {
         }
     }
 
+    func retryForward(index: Int) async {
+        do {
+            let _ = try await client.postJSON("/api/sms/forward/retry", body: ["index": index])
+            showMessage("Retry succeeded", isError: false)
+            await fetchLog()
+        } catch {
+            showMessage("Retry failed: \(error.localizedDescription)", isError: true)
+            await fetchLog()
+        }
+    }
+
     // MARK: - Helpers
 
     private func showMessage(_ text: String, isError: Bool) {

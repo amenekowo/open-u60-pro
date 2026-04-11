@@ -4,31 +4,43 @@ struct SMSForwardLogView: View {
     @Bindable var viewModel: SMSForwardViewModel
 
     var body: some View {
-        List(viewModel.log) { entry in
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text(entry.sender)
-                        .font(.headline)
-                    Spacer()
-                    Image(systemName: entry.success ? "checkmark.circle.fill" : "xmark.circle.fill")
-                        .foregroundStyle(entry.success ? .green : .red)
-                }
-                Text("\(entry.ruleName) → \(entry.destinationType)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text(entry.contentPreview)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                if let error = entry.error {
-                    Text(error)
+        List {
+            ForEach(Array(viewModel.log.enumerated()), id: \.element.id) { index, entry in
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(entry.sender)
+                            .font(.headline)
+                        Spacer()
+                        Image(systemName: entry.success ? "checkmark.circle.fill" : "xmark.circle.fill")
+                            .foregroundStyle(entry.success ? .green : .red)
+                    }
+                    Text("\(entry.ruleName) → \(entry.destinationType)")
                         .font(.caption)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(.secondary)
+                    Text(entry.contentPreview)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    if let error = entry.error {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                    Text(formatTimestamp(entry.timestamp))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
-                Text(formatTimestamp(entry.timestamp))
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                .padding(.vertical, 2)
+                .swipeActions(edge: .trailing) {
+                    if !entry.success {
+                        Button {
+                            Task { await viewModel.retryForward(index: index) }
+                        } label: {
+                            Label("Retry", systemImage: "arrow.clockwise")
+                        }
+                        .tint(.orange)
+                    }
+                }
             }
-            .padding(.vertical, 2)
         }
         .navigationTitle("Forward Log")
         .toolbar {

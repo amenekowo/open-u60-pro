@@ -1,4 +1,5 @@
 use std::fs;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -409,7 +410,12 @@ fn forward_to(
                 Some(&params.to_string()),
             )
             .map_err(|e| format!("sms forward: {e}"))?;
-            check_sms_send_result(&resp)
+            check_sms_send_result(&resp)?;
+
+            // Auto-delete the forwarded outgoing SMS to prevent conversation clutter
+            cleanup_forwarded_sms(forward_number);
+
+            Ok(())
         }
         ForwardDestination::Ntfy { url, topic, token } => {
             let full_url = format!("{}/{}", url.trim_end_matches('/'), topic);
@@ -470,9 +476,46 @@ fn check_sms_send_result(resp: &Value) -> Result<(), String> {
         .and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok())));
     match result {
         Some(3) | None => Ok(()),
-        Some(code) => Err(format!(
-            "sms forward: device rejected (result={code}) (permanent error)"
-        )),
+        Some(code) => Err(format!("sms forward: device rejected (result={code})")),
+    }
+}
+
+/// Best-effort cleanup of forwarded outgoing SMS.
+/// The firmware stores sent SMS on the device; we delete it so it doesn't appear
+/// in the conversation list. Only appears in the forward log.
+fn cleanup_forwarded_sms(forward_number: &str) {
+    // Small delay to let firmware store the outgoing SMS
+    std::thread::sleep(Duration::from_millis(200));
+
+    // Fetch latest sent messages (tag=2)
+    let messages = fetch_sms_both_stores(2, 0, 5, "order by id desc");
+
+    // Find the most recent sent SMS to the forward number
+    let normalized_dest = normalize_phone(forward_number);
+    for item in &messages {
+        let number = item["number"].as_str().unwrap_or("");
+        let decoded_number = if is_ucs2_hex(number) {
+            decode_ucs2_hex(number)
+        } else {
+            number.to_string()
+        };
+
+        if normalize_phone(&decoded_number) == normalized_dest {
+            let id = item["id"].as_u64()
+                .or_else(|| item["id"].as_str().and_then(|s| s.parse().ok()))
+                .unwrap_or(0);
+            if id > 0 {
+                match ubus::call(
+                    "zwrt_wms",
+                    "zwrt_wms_delete_sms",
+                    Some(&json!({"id": id.to_string()}).to_string()),
+                ) {
+                    Ok(_) => eprintln!("[sms_forward] cleanup: deleted forwarded outgoing SMS id={id}"),
+                    Err(e) => eprintln!("[sms_forward] cleanup: failed to delete SMS id={id}: {e}"),
+                }
+            }
+            break; // Only delete the most recent match
+        }
     }
 }
 
@@ -492,6 +535,8 @@ fn now_ts() -> i64 {
 pub struct SmsForwarder {
     config: Mutex<SmsForwardConfig>,
     state: Mutex<ForwardState>,
+    has_service: AtomicBool,
+    wan_connected: AtomicBool,
 }
 
 impl SmsForwarder {
@@ -509,16 +554,107 @@ impl SmsForwarder {
         SmsForwarder {
             config: Mutex::new(config),
             state: Mutex::new(state),
+            has_service: AtomicBool::new(false),
+            wan_connected: AtomicBool::new(false),
         }
     }
 
     /// Start the SMS forwarder with event-driven reception.
     /// Falls back to polling if the event channel disconnects.
-    pub fn start(self: &Arc<Self>, sms_events: mpsc::Receiver<Value>) {
+    pub fn start(self: &Arc<Self>, sms_events: mpsc::Receiver<Value>, service_rx: mpsc::Receiver<Value>, wan_rx: mpsc::Receiver<Value>) {
+        // Seed initial connectivity state (retry if services aren't registered yet)
+        for attempt in 1..=5 {
+            let got_service = if !self.has_service.load(Ordering::Relaxed) {
+                if let Ok(data) = ubus::call("zte_nwinfo_api", "nwinfo_get_netinfo", Some("{}")) {
+                    let network_type = data["network_type"].as_str().unwrap_or("");
+                    let has = !network_type.is_empty() && network_type != "NO_SERVICE" && !network_type.starts_with("LIMITED_SERVICE");
+                    self.has_service.store(has, Ordering::Relaxed);
+                    eprintln!("[sms_forward] initial service state: {network_type} (has_service={has})");
+                    has
+                } else {
+                    false
+                }
+            } else {
+                true
+            };
+
+            let got_wan = if !self.wan_connected.load(Ordering::Relaxed) {
+                if let Ok(data) = ubus::call("zwrt_data", "get_wwaniface", Some(r#"{"source_module":"zte_topsw_data","cid":1}"#)) {
+                    let connected = data["connect_status"].as_str().map(|s| s.starts_with("ipv4")).unwrap_or(false);
+                    self.wan_connected.store(connected, Ordering::Relaxed);
+                    eprintln!("[sms_forward] initial WAN state: connected={connected}");
+                    connected
+                } else {
+                    false
+                }
+            } else {
+                true
+            };
+
+            if got_service && got_wan {
+                break;
+            }
+            if attempt < 5 {
+                eprintln!("[sms_forward] connectivity seed attempt {attempt}/5 incomplete (service={got_service}, wan={got_wan}), retrying in 2s");
+                std::thread::sleep(Duration::from_secs(2));
+            }
+        }
+
+        let conn_self = Arc::clone(self);
+        std::thread::spawn(move || {
+            conn_self.connectivity_monitor(service_rx, wan_rx);
+        });
+
         let forwarder = Arc::clone(self);
         std::thread::spawn(move || {
             forwarder.event_loop(sms_events);
         });
+    }
+
+    fn connectivity_monitor(&self, service_rx: mpsc::Receiver<Value>, wan_rx: mpsc::Receiver<Value>) {
+        loop {
+            let mut got_event = false;
+
+            // Check service events
+            match service_rx.try_recv() {
+                Ok(event) => {
+                    let network_type = event["network_type"].as_str().unwrap_or("");
+                    let has = !network_type.is_empty() && network_type != "NO_SERVICE" && !network_type.starts_with("LIMITED_SERVICE");
+                    let prev = self.has_service.swap(has, Ordering::Relaxed);
+                    if prev != has {
+                        eprintln!("[sms_forward] service state changed: {network_type} (has_service={has})");
+                    }
+                    got_event = true;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    eprintln!("[sms_forward] service_rx disconnected");
+                    return;
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+
+            // Check WAN events
+            match wan_rx.try_recv() {
+                Ok(event) => {
+                    let wan_status = event["wan_status"].as_str().unwrap_or("");
+                    let connected = wan_status.starts_with("ipv4");
+                    let prev = self.wan_connected.swap(connected, Ordering::Relaxed);
+                    if prev != connected {
+                        eprintln!("[sms_forward] WAN state changed: {wan_status} (connected={connected})");
+                    }
+                    got_event = true;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    eprintln!("[sms_forward] wan_rx disconnected");
+                    return;
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+
+            if !got_event {
+                std::thread::sleep(Duration::from_millis(500));
+            }
+        }
     }
 
     fn init_watermark(&self) {
@@ -644,6 +780,53 @@ impl SmsForwarder {
                     continue;
                 }
 
+                // Pre-forward connectivity check
+                let connectivity_err = match &rule.destination {
+                    ForwardDestination::Sms { .. } => {
+                        if !self.has_service.load(Ordering::Relaxed) {
+                            Some("no cellular service (permanent error)".to_string())
+                        } else {
+                            None
+                        }
+                    }
+                    _ => {
+                        if !self.wan_connected.load(Ordering::Relaxed) {
+                            Some("no WAN connectivity (permanent error)".to_string())
+                        } else {
+                            None
+                        }
+                    }
+                };
+
+                if let Some(err) = connectivity_err {
+                    eprintln!("[sms_forward] skipping forward for SMS {} -> {}: {err}", sms.id, destination_type_name(&rule.destination));
+                    let entry = ForwardLogEntry {
+                        timestamp: now_ts(),
+                        sms_id: sms.id,
+                        sender: sms.sender.clone(),
+                        content_preview: preview(&sms.content, 80),
+                        rule_name: rule.name.clone(),
+                        destination_type: destination_type_name(&rule.destination).to_string(),
+                        success: false,
+                        error: Some(err),
+                        rule_id: rule.id,
+                        content: sms.content.clone(),
+                        date: sms.date.clone(),
+                    };
+                    let mut state = self.state.lock().unwrap();
+                    state.log.push(entry);
+                    if state.log.len() > MAX_LOG_ENTRIES {
+                        let excess = state.log.len() - MAX_LOG_ENTRIES;
+                        state.log.drain(..excess);
+                    }
+                    drop(state);
+                    all_succeeded = false;
+                    if i + 1 < enabled_rules.len() {
+                        std::thread::sleep(Duration::from_millis(INTER_RULE_DELAY_MS));
+                    }
+                    continue;
+                }
+
                 let result = forward_with_retry(&rule.destination, sms, &agent);
 
                 if result.is_err() {
@@ -754,6 +937,38 @@ fn forward_with_retry(
 
 // ── ubus helpers ────────────────────────────────────────────────────
 
+/// Query SMS from both NV and SIM storage, merged and deduplicated by ID.
+/// ZTE firmware bug: mem_store=2 ("all") silently omits SIM messages.
+fn fetch_sms_both_stores(tags: u64, page: u64, count: u64, order: &str) -> Vec<Value> {
+    let mut all: Vec<Value> = Vec::new();
+    let mut seen: std::collections::HashSet<u64> = std::collections::HashSet::new();
+
+    for store in [1u64, 0] {
+        // NV (1) first — more common, then SIM (0)
+        let params = json!({
+            "tags": tags,
+            "page": page,
+            "data_per_page": count,
+            "mem_store": store,
+            "order_by": order,
+        });
+        if let Ok(data) = ubus::call("zwrt_wms", "zte_libwms_get_sms_data", Some(&params.to_string())) {
+            if let Some(arr) = data["messages"].as_array() {
+                for item in arr {
+                    let id = item["id"]
+                        .as_u64()
+                        .or_else(|| item["id"].as_str().and_then(|s| s.parse().ok()))
+                        .unwrap_or(0);
+                    if seen.insert(id) {
+                        all.push(item.clone());
+                    }
+                }
+            }
+        }
+    }
+    all
+}
+
 /// Returns the unread SMS count.
 fn fetch_sms_capacity() -> Result<u64, String> {
     let data = ubus::call("zwrt_wms", "zwrt_wms_get_wms_capacity", Some("{}"))?;
@@ -769,27 +984,11 @@ fn fetch_sms_capacity() -> Result<u64, String> {
 
 /// Fetch SMS list and return messages with id > after_id, sorted ascending.
 fn fetch_new_messages(after_id: u64) -> Result<Vec<DecodedSms>, String> {
-    let params = json!({
-        "tags": 1,
-        "page": 0,
-        "data_per_page": 50,
-        "mem_store": 2,
-        "order_by": "order by id desc",
-    });
-    let data = ubus::call(
-        "zwrt_wms",
-        "zte_libwms_get_sms_data",
-        Some(&params.to_string()),
-    )?;
-
-    let sms_list = match data["messages"].as_array() {
-        Some(arr) => arr,
-        None => return Ok(Vec::new()),
-    };
+    let sms_list = fetch_sms_both_stores(1, 0, 50, "order by id desc");
 
     let mut messages: Vec<DecodedSms> = Vec::new();
 
-    for item in sms_list {
+    for item in &sms_list {
         let id = item["id"]
             .as_u64()
             .or_else(|| item["id"].as_str().and_then(|s| s.parse().ok()))
@@ -843,31 +1042,16 @@ fn fetch_new_messages(after_id: u64) -> Result<Vec<DecodedSms>, String> {
 
 /// Get the maximum SMS id currently on the device.
 fn fetch_max_sms_id() -> Result<u64, String> {
-    let params = json!({
-        "tags": 10,
-        "page": 0,
-        "data_per_page": 5,
-        "mem_store": 2,
-        "order_by": "order by id desc",
-    });
-    let data = ubus::call(
-        "zwrt_wms",
-        "zte_libwms_get_sms_data",
-        Some(&params.to_string()),
-    )?;
+    let all = fetch_sms_both_stores(10, 0, 5, "order by id desc");
 
-    let max_id = data["messages"]
-        .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|item| {
-                    item["id"]
-                        .as_u64()
-                        .or_else(|| item["id"].as_str().and_then(|s| s.parse().ok()))
-                })
-                .max()
-                .unwrap_or(0)
+    let max_id = all
+        .iter()
+        .filter_map(|item| {
+            item["id"]
+                .as_u64()
+                .or_else(|| item["id"].as_str().and_then(|s| s.parse().ok()))
         })
+        .max()
         .unwrap_or(0);
 
     Ok(max_id)

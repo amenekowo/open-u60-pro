@@ -52,6 +52,12 @@ struct ToolsListView: View {
                     }
 
                     NavigationLink {
+                        ATTerminalView(viewModel: ATTerminalViewModel(client: client, authManager: authManager))
+                    } label: {
+                        Label("AT Terminal", systemImage: "terminal.fill")
+                    }
+
+                    NavigationLink {
                         DeviceInfoView(viewModel: DeviceInfoViewModel(client: client, authManager: authManager))
                     } label: {
                         Label("Device Info", systemImage: "info.circle")

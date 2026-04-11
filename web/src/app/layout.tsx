@@ -70,7 +70,7 @@ export default function RootLayout({
       className={`${syne.variable} ${jakarta.variable} ${jetbrains.variable}`}
     >
       <head>
-        <meta name="theme-color" content="#0a0a0a" />
+        <meta name="theme-color" content="#EAEFEF" />
       </head>
       <body className="grain-overlay">
         <Navbar />

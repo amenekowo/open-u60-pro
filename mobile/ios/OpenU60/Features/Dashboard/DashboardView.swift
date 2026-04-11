@@ -79,6 +79,7 @@ struct DashboardView: View {
                             operatorInfo: viewModel.operatorInfo,
                             nrSignal: viewModel.nrSignal,
                             lteSignal: viewModel.lteSignal,
+                            wcdmaSignal: viewModel.wcdmaSignal,
                             isAirplaneMode: viewModel.isAirplaneMode
                         )
                     }

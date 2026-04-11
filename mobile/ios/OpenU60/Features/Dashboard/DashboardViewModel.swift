@@ -8,6 +8,7 @@ private let logger = Logger(subsystem: "com.zte.companion", category: "Dashboard
 final class DashboardViewModel {
     var nrSignal: NRSignal = .empty
     var lteSignal: LTESignal = .empty
+    var wcdmaSignal: WCDMASignal = .empty
     var operatorInfo: OperatorInfo = .empty
     var battery: BatteryStatus = .empty
     var thermal: ThermalStatus = .empty
@@ -94,9 +95,10 @@ final class DashboardViewModel {
             battCurrentResult, simResult, modemResult, mobileDataResult
         )
 
-        if let (nr, lte, _, op) = signalResult {
+        if let (nr, lte, wcdma, op) = signalResult {
             if nr != nrSignal { nrSignal = nr }
             if lte != lteSignal { lteSignal = lte }
+            if wcdma != wcdmaSignal { wcdmaSignal = wcdma }
             if op != operatorInfo { operatorInfo = op }
         }
         if let opMode = modemStatus {
@@ -108,6 +110,7 @@ final class DashboardViewModel {
                 if airplane {
                     nrSignal = .empty
                     lteSignal = .empty
+                    wcdmaSignal = .empty
                     operatorInfo = .empty
                 }
             }

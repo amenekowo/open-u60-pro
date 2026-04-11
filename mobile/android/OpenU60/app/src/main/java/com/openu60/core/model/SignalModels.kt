@@ -81,7 +81,7 @@ data class OperatorInfo(
             val raw = networkType.uppercase()
             return when {
                 raw == "SA" || raw == "5G SA" || raw.contains("NR SA") -> NetworkMode.SA
-                raw == "NSA" || raw == "ENDC" || raw == "EN-DC" || raw.contains("NR NSA") -> NetworkMode.NSA
+                raw.contains("NSA") || raw == "ENDC" || raw == "EN-DC" -> NetworkMode.NSA
                 raw.contains("LTE") || raw == "4G" || raw == "4G+" -> NetworkMode.LTE
                 raw.contains("WCDMA") || raw.contains("UMTS") || raw.contains("GSM")
                     || raw.contains("2G") || raw.contains("3G") -> NetworkMode.LEGACY

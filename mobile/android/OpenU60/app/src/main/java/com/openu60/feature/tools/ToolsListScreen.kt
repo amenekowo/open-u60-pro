@@ -28,6 +28,7 @@ fun ToolsListScreen(
     onNavigateToLANSpeedTest: () -> Unit,
     onNavigateToSMSForward: () -> Unit,
     onNavigateToProcessList: () -> Unit,
+    onNavigateToATTerminal: () -> Unit,
     onNavigateToPlaceholder: (String) -> Unit,
 ) {
     Scaffold(
@@ -108,6 +109,12 @@ fun ToolsListScreen(
                 title = "Process Monitor",
                 subtitle = "View processes, kill bloat daemons",
                 onClick = onNavigateToProcessList,
+            )
+            ToolItem(
+                icon = Icons.Default.Terminal,
+                title = "AT Terminal",
+                subtitle = "Send raw AT commands to modem",
+                onClick = onNavigateToATTerminal,
             )
 
             Spacer(modifier = Modifier.height(8.dp))

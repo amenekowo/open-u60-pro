@@ -262,17 +262,18 @@ if $SSH_CMD "echo ok" >/dev/null 2>&1; then
 else
     warn "SSH not reachable — falling back to ADB."
 
-# ── Steps 1-2: Enable ADB + connect ──────────────────────────────────
-if adb devices 2>/dev/null | grep -qw device; then
-    ok "ADB already connected, skipping web auth."
-else
-    info "Authenticating with router web interface..."
+    # ── Steps 1-2: Enable ADB + connect ──────────────────────────────────
+    if adb devices 2>/dev/null | grep -qw device; then
+        ok "ADB already connected, skipping web auth."
+    else
+        info "Authenticating with router web interface..."
 
-    ANON_SESSION="00000000000000000000000000000000"
+        ANON_SESSION="00000000000000000000000000000000"
 
-    # Get salt (with safe JSON extraction)
-    SALT_RESP=$(ubus_call "$ANON_SESSION" "zwrt_web" "web_login_info" '{}')
-    SALT=$(echo "$SALT_RESP" | python3 -c '
+        # Get salt (with safe JSON extraction)
+        # || true prevents set -e from killing the script before we can show a helpful error
+        SALT_RESP=$(ubus_call "$ANON_SESSION" "zwrt_web" "web_login_info" '{}') || true
+        SALT=$(echo "$SALT_RESP" | python3 -c '
 import sys, json
 try:
     print(json.load(sys.stdin)[0]["result"][1]["zte_web_sault"])
@@ -280,17 +281,17 @@ except Exception:
     pass
 ' 2>/dev/null)
 
-    if [ -z "$SALT" ]; then
-        fail "Failed to extract salt. Is the router reachable at $GATEWAY?"
-    fi
+        if [ -z "$SALT" ]; then
+            fail "Failed to extract salt. Is the router reachable at $GATEWAY?"
+        fi
 
-    # Hash password
-    PASS_HASH=$(upper "$(sha256 "$ROUTER_PASSWORD")")
-    LOGIN_HASH=$(upper "$(sha256 "${PASS_HASH}${SALT}")")
+        # Hash password
+        PASS_HASH=$(upper "$(sha256 "$ROUTER_PASSWORD")")
+        LOGIN_HASH=$(upper "$(sha256 "${PASS_HASH}${SALT}")")
 
-    # Login (with safe JSON extraction)
-    LOGIN_RESP=$(ubus_call "$ANON_SESSION" "zwrt_web" "web_login" "{\"password\":\"$LOGIN_HASH\"}")
-    SESSION=$(echo "$LOGIN_RESP" | python3 -c '
+        # Login (with safe JSON extraction)
+        LOGIN_RESP=$(ubus_call "$ANON_SESSION" "zwrt_web" "web_login" "{\"password\":\"$LOGIN_HASH\"}") || true
+        SESSION=$(echo "$LOGIN_RESP" | python3 -c '
 import sys, json
 try:
     print(json.load(sys.stdin)[0]["result"][1]["ubus_rpc_session"])
@@ -298,23 +299,25 @@ except Exception:
     pass
 ' 2>/dev/null)
 
-    if [ -z "$SESSION" ] || [ "$SESSION" = "null" ]; then
-        fail "Login failed. Check your router password."
-    fi
-    ok "Logged in to router (session: ${SESSION:0:8}...)."
+        if [ -z "$SESSION" ] || [ "$SESSION" = "null" ]; then
+            fail "Login failed. Check your router password."
+        fi
+        ok "Logged in to router (session: ${SESSION:0:8}...)."
 
-    # Set USB mode to debug
-    info "Enabling ADB (USB debug mode)..."
-    ubus_call "$SESSION" "zwrt_bsp.usb" "set" '{"mode":"debug"}' >/dev/null
-    ok "USB debug mode enabled."
+        # Set USB mode to debug
+        info "Enabling ADB (USB debug mode)..."
+        if ! ubus_call "$SESSION" "zwrt_bsp.usb" "set" '{"mode":"debug"}' >/dev/null; then
+            fail "Failed to enable USB debug mode. Session may have expired."
+        fi
+        ok "USB debug mode enabled."
 
-    # Wait for ADB device
-    info "Waiting for ADB device (plug USB cable if not connected)..."
-    if ! wait_with_timeout 30 adb wait-for-device 2>/dev/null; then
-        fail "ADB device not found after 30s. Check USB connection."
+        # Wait for ADB device
+        info "Waiting for ADB device (plug USB cable if not connected)..."
+        if ! wait_with_timeout 30 adb wait-for-device 2>/dev/null; then
+            fail "ADB device not found after 30s. Check USB connection."
+        fi
+        ok "ADB device connected."
     fi
-    ok "ADB device connected."
-fi
 fi
 
 # ── Helper: remote command / push ────────────────────────────────────

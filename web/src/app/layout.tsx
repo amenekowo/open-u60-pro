@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Syne, Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
 import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
 import "./globals.css";
@@ -76,6 +77,7 @@ export default function RootLayout({
         <Navbar />
         <main className="relative z-0 overflow-x-hidden">{children}</main>
         <Footer />
+        <Analytics />
       </body>
     </html>
   );

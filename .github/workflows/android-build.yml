@@ -1,0 +1,104 @@
+name: Android Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      build-type:
+        description: Type of build
+        required: true
+        default: release
+        type: choice
+        options:
+          - debug
+          - release
+          - both
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install build-tools
+        run: sdkmanager "build-tools;35.0.0"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.11.1
+
+      - name: Generate Gradle Wrapper
+        run: gradle wrapper --gradle-version 8.11.1
+        working-directory: mobile/android/OpenU60
+
+      - name: Create proguard-rules.pro
+        run: touch app/proguard-rules.pro
+        working-directory: mobile/android/OpenU60
+
+      - name: Generate test keystore
+        run: |
+          keytool -genkey -v \
+            -keystore test.keystore \
+            -alias openu60 \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 36500 \
+            -storepass openu60 \
+            -keypass openu60 \
+            -dname "CN=OpenU60, OU=Development, O=OpenU60, L=Unknown, ST=Unknown, C=XX"
+        working-directory: mobile/android/OpenU60
+
+      - name: Build debug APK
+        if: inputs.build-type == 'debug' || inputs.build-type == 'both'
+        run: ./gradlew assembleDebug
+        working-directory: mobile/android/OpenU60
+
+      - name: Upload debug APK
+        if: inputs.build-type == 'debug' || inputs.build-type == 'both'
+        uses: actions/upload-artifact@v4
+        with:
+          name: openu60-debug
+          path: mobile/android/OpenU60/app/build/outputs/apk/debug/*.apk
+
+      - name: Build unsigned release APK
+        if: inputs.build-type == 'release' || inputs.build-type == 'both'
+        run: ./gradlew assembleRelease
+        working-directory: mobile/android/OpenU60
+
+      - name: Sign release APK with test key
+        if: inputs.build-type == 'release' || inputs.build-type == 'both'
+        run: |
+          apksigner=$(find "$ANDROID_SDK_ROOT"/build-tools -name apksigner -type f 2>/dev/null | head -1)
+          if [ -z "$apksigner" ]; then
+            echo "apksigner not found" >&2
+            exit 1
+          fi
+          mv app/build/outputs/apk/release/app-release-unsigned.apk app/build/outputs/apk/release/app-release-unaligned.apk
+          "$apksigner" sign \
+            --ks test.keystore \
+            --ks-pass pass:openu60 \
+            --ks-key-alias openu60 \
+            --key-pass pass:openu60 \
+            --out app/build/outputs/apk/release/openu60-release.apk \
+            app/build/outputs/apk/release/app-release-unaligned.apk
+        working-directory: mobile/android/OpenU60
+
+      - name: Upload release APK
+        if: inputs.build-type == 'release' || inputs.build-type == 'both'
+        uses: actions/upload-artifact@v4
+        with:
+          name: openu60-release
+          path: mobile/android/OpenU60/app/build/outputs/apk/release/openu60-release.apk
